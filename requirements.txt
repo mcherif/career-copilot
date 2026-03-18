@@ -1,0 +1,7 @@
+sqlalchemy
+alembic
+requests
+python-dateutil
+click
+colorlog
+python-dotenv
