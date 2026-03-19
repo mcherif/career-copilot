@@ -31,3 +31,8 @@ logs/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Private Candidate Data
+resumes/
+*.pdf
+profile.yaml

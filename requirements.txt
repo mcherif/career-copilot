@@ -5,3 +5,4 @@ python-dateutil
 click
 colorlog
 python-dotenv
+pyyaml

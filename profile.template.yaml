@@ -1,0 +1,50 @@
+# Copy this file to profile.yaml and fill in your details.
+# profile.yaml is git-ignored to protect your personal information.
+
+personal:
+  name: "John Doe"
+  location: "New York, NY"
+  timezone: "EST"
+
+skills:
+  - Python
+  - SQL
+  - Docker
+  - AWS
+
+keywords:
+  - software
+  - backend
+  - api
+
+target_roles:
+  - software engineer
+  - backend developer
+  - full stack engineer
+
+seniority:
+  preferred:
+    - senior
+  acceptable:
+    - mid
+
+preferences:
+  remote_only: true
+  accepted_regions:
+    - worldwide
+    - emea
+  reject_regions:
+    - us only
+  contractor_ok: true
+
+work_authorization:
+  emea: true
+  sponsorship_required: false
+
+resumes:
+  - name: "general_swe"
+    path: "resumes/john_doe_swe.pdf"
+    tags:
+      - software
+      - backend
+      - api

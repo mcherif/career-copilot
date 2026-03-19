@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from dateutil import parser
 from connectors.base import BaseConnector
 from utils.ats_detector import detect_ats
+from utils.text_cleaning import clean_description
 from utils.logger import setup_logger
 
 logger = setup_logger("remotive_connector")
@@ -52,6 +53,7 @@ class RemotiveConnector(BaseConnector):
             "location": location,
             "raw_location_text": raw_location,
             "description": raw_job.get("description", ""),
+            "description_text": clean_description(raw_job.get("description", "")),
             "url": url,
             "ats_type": detect_ats(url),
             "posted_date": posted_date,
