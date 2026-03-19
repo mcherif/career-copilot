@@ -2,6 +2,18 @@ import re
 from typing import Dict, Any
 from utils.remote_filter import classify_remote_eligibility
 
+KEYWORD_ALIASES = {
+    "computer vision": ["cv"],
+    "cv": ["computer vision"],
+    "llm": ["large language model", "large language models", "genai", "generative ai"],
+    "mlops": ["ml infra", "ml infrastructure", "deployment", "production ml"],
+    "model serving": ["serving", "inference serving"],
+    "iot": ["internet of things"],
+    "embedded": ["embedded systems"],
+    "ai": ["artificial intelligence", "ai systems", "enterprise ai", "production ai"],
+    "nlp": ["natural language processing"],
+}
+
 def _find_matches(text: str, candidates: list) -> list:
     """Find robust whole-word and symbol matches of terms in text."""
     if not text or not candidates:
@@ -30,6 +42,34 @@ def _unique(items: list) -> list:
             ordered.append(item)
             seen.add(item)
     return ordered
+
+def _profile_blob(profile: Dict[str, Any]) -> str:
+    parts = []
+    for key in ("skills", "keywords", "target_roles", "summary"):
+        value = profile.get(key, [])
+        if isinstance(value, list):
+            parts.extend(str(item or "") for item in value)
+        elif value:
+            parts.append(str(value))
+    return " ".join(parts).lower()
+
+def _expanded_keywords(profile: Dict[str, Any]) -> list:
+    explicit_keywords = [str(keyword).strip() for keyword in profile.get("keywords", []) if str(keyword).strip()]
+    expanded = list(explicit_keywords)
+
+    for keyword in explicit_keywords:
+        expanded.extend(KEYWORD_ALIASES.get(keyword.lower(), []))
+
+    # Add a few adjacent AI-domain keywords when the profile clearly targets those areas.
+    profile_text = _profile_blob(profile)
+    if any(token in profile_text for token in ["llm", "machine learning", "ml engineer", "mlops", "ai engineer", "pytorch"]):
+        expanded.append("ai")
+    if any(token in profile_text for token in ["llm", "ai engineer", "machine learning", "ml engineer", "computer vision"]):
+        expanded.append("nlp")
+    if any(token in profile_text for token in ["computer vision", "opencv"]):
+        expanded.append("cv")
+
+    return _unique(expanded)
 
 def _matches_seniority_level(text: str, level: str) -> bool:
     normalized_level = str(level or "").strip().lower()
@@ -147,7 +187,7 @@ def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
     score += skills_score
     
     # B. Keywords overlap
-    keywords = profile.get("keywords", [])
+    keywords = _expanded_keywords(profile)
     title_keywords = _find_matches(title, keywords)
     description_keywords = [keyword for keyword in _find_matches(description, keywords) if keyword not in title_keywords]
     matched_keywords = _unique(title_keywords + description_keywords)

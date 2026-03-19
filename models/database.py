@@ -20,6 +20,7 @@ class Job(Base):
     remote_eligibility = Column(String, nullable=True)
     ats_type = Column(String, nullable=True)
     fit_score = Column(Integer, nullable=True)
+    rule_status = Column(String, nullable=True)
     llm_fit_score = Column(Integer, nullable=True)
     llm_strengths = Column(Text, nullable=True)
     fit_explanation = Column(Text, nullable=True)

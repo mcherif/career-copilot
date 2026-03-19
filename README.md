@@ -2,14 +2,14 @@
 
 Career Copilot is an intelligent job discovery and application assistant designed for remote technical roles.
 
-It automatically discovers job opportunities, evaluates them against your profile, and assists with application form filling — while always keeping a **human in control of final submissions**.
+It automatically discovers job opportunities, evaluates them against your profile, and assists with application form filling while always keeping a **human in control of final submissions**.
 
 The goal is to reduce the time spent searching and applying to jobs while maintaining safety, transparency, and full oversight.
 
 ## Why this project exists
 
-Job searching often requires repeating the same manual steps across dozens of platforms.  
-Career Copilot focuses on automating the *mechanical parts* of the process while keeping humans responsible for the final decision.
+Job searching often requires repeating the same manual steps across dozens of platforms.
+Career Copilot focuses on automating the mechanical parts of the process while keeping humans responsible for the final decision.
 
 The goal is **assistive automation, not blind automation**.
 
@@ -30,24 +30,74 @@ Career Copilot helps automate the most repetitive parts of the job search proces
 
 ## Design Principles
 
-**Privacy First** – All LLM processing happens locally using open-weight models through Ollama.
+**Privacy First** - All LLM processing happens locally using open-weight models through Ollama.
 
-**Human in the Loop** – No application is submitted automatically. Every submission requires explicit approval.
+**Human in the Loop** - No application is submitted automatically. Every submission requires explicit approval.
 
-**Safety by Default** – Development mode runs with `DRY_RUN=true` to prevent accidental submissions.
+**Safety by Default** - Development mode runs with `DRY_RUN=true` to prevent accidental submissions.
 
-**Modular Architecture** – Each component (job discovery, evaluation, automation) works independently.
+**Modular Architecture** - Each component (job discovery, evaluation, automation) works independently.
 
 ---
 
 ## System Pipeline
 
-Job Sources → Ingestion Pipeline → Normalization → Database → Career Intelligence → LLM Analysis → Prefill Automation → Human Approval → Submission
+Job Sources -> Ingestion Pipeline -> Normalization -> Database -> Career Intelligence -> LLM Analysis -> Prefill Automation -> Human Approval -> Submission
+
+Current implemented CLI orchestration:
+
+```text
+python run_pipeline.py full-run
+        |
+        v
+[FETCH]
+  -> pull jobs from source
+  -> normalize
+  -> dedupe
+  -> insert new jobs
+
+        |
+        v
+[EVALUATE]
+  -> compute remote eligibility
+  -> compute rule-based fit_score
+  -> assign status
+  -> select recommended resume
+
+        |
+        v
+[ANALYZE]
+  -> send selected jobs to Ollama
+  -> structured JSON reasoning
+  -> conservative promotion/demotion
+  -> persist LLM fields
+```
+
+Result: `jobs` table
+
+```text
+job metadata
+rule-based scoring
+recommended resume
+LLM reasoning + confidence
+final job status
+```
+
+Example production command:
+
+```powershell
+python run_pipeline.py full-run `
+  --source remotive `
+  --profile profile.yaml `
+  --model qwen2.5:7b `
+  --analyze-status review `
+  --analyze-limit 10
+```
 
 Full technical documentation:
 
-➡ **docs/ARCHITECTURE.md**
+- `docs/ARCHITECTURE.md`
 
 Planned enhancements and future work:
 
-➡ **docs/improvements.md**
+- `docs/improvements.md`
