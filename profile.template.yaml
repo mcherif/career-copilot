@@ -6,6 +6,10 @@ personal:
   location: "New York, NY"
   timezone: "EST"
 
+summary:
+  - "Short optional bullets describing seniority, domain strengths, and notable background."
+  - "Useful for LLM analysis prompts when titles or keyword lists alone miss prior experience."
+
 skills:
   - Python
   - SQL

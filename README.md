@@ -47,3 +47,7 @@ Job Sources → Ingestion Pipeline → Normalization → Database → Career Int
 Full technical documentation:
 
 ➡ **docs/ARCHITECTURE.md**
+
+Planned enhancements and future work:
+
+➡ **docs/improvements.md**

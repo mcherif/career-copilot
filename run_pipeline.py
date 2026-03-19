@@ -1,12 +1,14 @@
 import click
 import yaml
 import datetime
+import json
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from models.database import Base, Job, PipelineRun
 from connectors.remotive import RemotiveConnector
 from utils.dedup import is_duplicate
 from utils.application_filter import has_already_applied
+from utils.llm_analysis import analyze_job_with_ollama
 from utils.scoring import score_job
 from utils.resume_selector import select_resume
 from utils.logger import setup_logger
@@ -26,6 +28,10 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 def cli():
     """Career Copilot Data Pipeline CLI."""
     pass
+
+def _load_profile(profile_path: str):
+    with open(profile_path, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
 
 @cli.command()
 @click.option('--source', required=True, type=click.Choice(['remotive', 'remoteok', 'all']), help='Job source to fetch from')
@@ -110,8 +116,7 @@ def fetch(source: str, dry_run: bool):
 def evaluate(profile: str, dry_run: bool, all_jobs: bool):
     """Evaluate raw jobs against candidate profile and assign scores."""
     try:
-        with open(profile, 'r', encoding='utf-8') as f:
-            candidate_profile = yaml.safe_load(f)
+        candidate_profile = _load_profile(profile)
     except Exception as e:
         logger.error(f"Failed to load profile {profile}: {e}")
         return
@@ -175,6 +180,114 @@ def evaluate(profile: str, dry_run: bool, all_jobs: bool):
     except Exception as e:
         session.rollback()
         logger.error(f"Evaluation pipeline failed: {e}")
+    finally:
+        session.close()
+
+@cli.command()
+@click.option('--profile', default='profile.yaml', help='Path to candidate profile YAML')
+@click.option('--model', default=config.OLLAMA_MODEL, help='Ollama model name')
+@click.option('--status', 'target_status', default=config.LLM_STATUS_DEFAULT, type=click.Choice(['review', 'shortlisted', 'rejected']), help='Job status bucket to analyze')
+@click.option('--limit', default=config.LLM_MAX_JOBS_PER_RUN, type=int, show_default=True, help='Maximum number of jobs to analyze')
+@click.option('--dry-run', is_flag=True, help='Analyze without saving to DB')
+def analyze(profile: str, model: str, target_status: str, limit: int, dry_run: bool):
+    """Analyze selected jobs with Ollama and conservatively adjust status."""
+    try:
+        candidate_profile = _load_profile(profile)
+    except Exception as e:
+        logger.error(f"Failed to load profile {profile}: {e}")
+        return
+
+    limit = max(1, limit)
+    logger.info(
+        f"Starting LLM analysis using profile '{profile}', model '{model}', "
+        f"status='{target_status}' (dry_run={dry_run}, limit={limit})"
+    )
+    session = SessionLocal()
+
+    try:
+        jobs_to_analyze = (
+            session.query(Job)
+            .filter(Job.status == target_status)
+            .order_by(Job.fit_score.desc(), Job.id.asc())
+            .limit(limit)
+            .all()
+        )
+        logger.info(f"Found {len(jobs_to_analyze)} jobs to analyze.")
+
+        counts = {"promoted": 0, "kept_review": 0, "rejected": 0, "failed": 0, "unchanged": 0}
+
+        for idx, job in enumerate(jobs_to_analyze, 1):
+            try:
+                original_status = job.status
+                job_dict = {c.name: getattr(job, c.name) for c in job.__table__.columns}
+                analysis = analyze_job_with_ollama(job_dict, candidate_profile, model)
+
+                if analysis.get("llm_status") == "failed":
+                    job.llm_fit_score = None
+                    job.llm_strengths = json.dumps([], ensure_ascii=False)
+                    job.fit_explanation = None
+                    job.skill_gaps = json.dumps([], ensure_ascii=False)
+                    job.recommendation = None
+                    job.llm_confidence = None
+                    job.llm_status = "failed"
+                    counts["failed"] += 1
+                    logger.warning(
+                        f"LLM analysis failed for '{job.title}' @ '{job.company}': "
+                        f"{analysis.get('error', 'unknown error')}"
+                    )
+                else:
+                    job.llm_fit_score = analysis.get("llm_fit_score")
+                    job.llm_strengths = json.dumps(analysis.get("llm_strengths", []), ensure_ascii=False)
+                    job.fit_explanation = analysis.get("fit_explanation")
+                    job.skill_gaps = json.dumps(analysis.get("skill_gaps", []), ensure_ascii=False)
+                    job.recommendation = analysis.get("recommendation")
+                    job.llm_confidence = analysis.get("llm_confidence")
+                    job.llm_status = analysis.get("llm_status")
+
+                    if analysis.get("recommended_resume"):
+                        job.recommended_resume = analysis.get("recommended_resume")
+
+                    confidence = analysis.get("llm_confidence") or 0
+                    recommendation = analysis.get("recommendation")
+
+                    if recommendation == "shortlist" and confidence >= config.LLM_PROMOTION_CONFIDENCE:
+                        job.status = "shortlisted"
+                        counts["promoted"] += 1
+                    elif recommendation == "reject" and confidence >= config.LLM_PROMOTION_CONFIDENCE:
+                        job.status = "rejected"
+                        counts["rejected"] += 1
+                    elif original_status == "review":
+                        job.status = "review"
+                        counts["kept_review"] += 1
+                    else:
+                        job.status = original_status
+                        counts["unchanged"] += 1
+
+                    logger.info(
+                        f"LLM analyzed '{job.title}' @ '{job.company}' -> "
+                        f"recommendation={recommendation}, confidence={confidence}, status={job.status}"
+                    )
+
+                if not dry_run and idx % 10 == 0:
+                    session.commit()
+            except Exception as e:
+                session.rollback()
+                job.llm_status = "failed"
+                counts["failed"] += 1
+                logger.warning(f"Unexpected LLM analysis failure for job {job.id}: {e}")
+
+        if not dry_run:
+            session.commit()
+
+        logger.info(
+            "LLM analysis complete. "
+            f"Analyzed {len(jobs_to_analyze)} {target_status} jobs: "
+            f"promoted={counts['promoted']}, kept_review={counts['kept_review']}, "
+            f"rejected={counts['rejected']}, unchanged={counts['unchanged']}, failed={counts['failed']}"
+        )
+    except Exception as e:
+        session.rollback()
+        logger.error(f"LLM analysis pipeline failed: {e}")
     finally:
         session.close()
 
