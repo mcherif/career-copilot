@@ -64,7 +64,7 @@ _TIMEZONE_MATCHES: list[tuple[str, list[str]]] = [
     ("utc −05", ["new_york", "eastern", "est", "edt", "et", "utc-5"]),
     ("utc −04", ["halifax", "atlantic", "ast", "utc-4"]),
     ("utc ±00", ["london", "gmt", "utc+0", "utc0", "utc±0", "dublin", "lisbon"]),
-    ("utc +01", ["berlin", "paris", "warsaw", "cet", "utc+1", "amsterdam"]),
+    ("utc +01", ["berlin", "paris", "warsaw", "cet", "utc+1", "amsterdam", "tunis"]),
     ("utc +02", ["istanbul", "eet", "utc+2", "cairo", "bucharest"]),
     ("utc +03", ["moscow", "riyadh", "utc+3", "nairobi"]),
     ("utc +04", ["dubai", "utc+4", "baku"]),
@@ -373,7 +373,10 @@ def _pick_radio(
     if "timezone" in question_label or "utc" in " ".join(option_labels[:2]):
         for i, opt in enumerate(option_labels):
             for tz_key, tz_values in _TIMEZONE_MATCHES:
-                if tz_key in opt and any(v in profile_tz for v in tz_values):
+                if tz_key in opt and any(
+                    re.search(r'\b' + re.escape(v) + r'\b', profile_tz)
+                    for v in tz_values
+                ):
                     return i
         return None  # don't guess timezone
 
