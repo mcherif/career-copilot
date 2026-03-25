@@ -416,7 +416,7 @@ def rejected(limit: int):
 def open_job(job_id, headless):
     """Open a shortlisted job in the browser, inspect the application form, and record the outcome."""
     from playwright.async_api import async_playwright
-    from utils.form_inspector import try_click_apply, scan_fields, format_field_report
+    from utils.form_inspector import try_click_apply, scan_fields, format_field_report, extract_apply_url
 
     session = SessionLocal()
     try:
@@ -464,13 +464,26 @@ def open_job(job_id, headless):
                     await browser.close()
                     return
 
-                clicked = await try_click_apply(page)
-                if clicked:
-                    click.echo("Apply button found and clicked.")
-                else:
-                    click.echo("No Apply button detected — showing fields from current page.")
+                # On listing aggregators (Remotive etc.) try to resolve the
+                # direct employer apply URL before doing anything else.
+                resolved = await extract_apply_url(page)
+                if resolved and resolved != target_url:
+                    click.echo(f"Resolved apply URL: {resolved}")
+                    try:
+                        await page.goto(resolved, wait_until="load", timeout=30000)
+                        await page.wait_for_timeout(2000)
+                    except Exception as e:
+                        click.echo(f"Could not navigate to resolved URL: {e}")
 
-                fields = await scan_fields(page)
+                active_page = page
+                clicked, active_page = await try_click_apply(active_page)
+                if clicked:
+                    click.echo(f"Apply button clicked. Now at: {active_page.url}")
+                    await active_page.wait_for_timeout(2000)
+                else:
+                    click.echo("No Apply button detected — scanning current page.")
+
+                fields = await scan_fields(active_page)
                 if fields:
                     click.echo(f"\nForm fields detected ({len(fields)}, * = required):")
                     click.echo(format_field_report(fields))

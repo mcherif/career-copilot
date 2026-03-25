@@ -3,7 +3,8 @@ ATS_PATTERNS = {
     "lever": ["lever.co"],
     "workday": ["workday.com", "myworkdayjobs.com"],
     "ashby": ["ashbyhq.com"],
-    "smartrecruiters": ["smartrecruiters.com"]
+    "smartrecruiters": ["smartrecruiters.com"],
+    "notion": ["notion.so", "notion.site"],
 }
 
 def detect_ats(url: str) -> str:
