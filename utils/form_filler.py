@@ -337,16 +337,21 @@ def _should_check(label_lower: str, profile: dict, job: dict) -> bool | None:
             return True
         return None  # different role — leave untouched
 
+    # Strip parenthetical clarifiers before keyword matching so that
+    # e.g. "Content Creator (video / 3d / illustrator / artist / etc)"
+    # doesn't match the "video" keyword — the core label is "Content Creator".
+    core_label = re.sub(r'\(.*?\)', '', label_lower).strip()
+
     # Skills checkboxes — check if label matches a profile skill.
     for skill in profile_skills:
-        if skill in label_lower or label_lower in skill:
+        if skill in core_label or core_label in skill:
             return True
     for kw in profile_keywords:
-        if kw in label_lower:
+        if kw in core_label:
             return True
 
     # Career type — check the developer/engineer option.
-    if any(dev in label_lower for dev in _DEVELOPER_LABELS):
+    if any(dev in core_label for dev in _DEVELOPER_LABELS):
         return True
 
     return None  # don't touch
