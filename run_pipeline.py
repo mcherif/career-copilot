@@ -412,11 +412,15 @@ def rejected(limit: int):
 
 @cli.command(name='open-job')
 @click.option('--job-id', type=int, default=None, help='Specific job ID to open (default: top shortlisted by fit_score)')
+@click.option('--profile', default='profile.yaml', help='Path to candidate profile YAML')
 @click.option('--headless', is_flag=True, default=False, help='Run headless (default: headful)')
-def open_job(job_id, headless):
+@click.option('--fill/--no-fill', default=True, help='Auto-fill detected form fields from profile (default: on)')
+@click.option('--dry-run', is_flag=True, default=False, help='Show what would be filled without touching the form')
+def open_job(job_id, profile, headless, fill, dry_run):
     """Open a shortlisted job in the browser, inspect the application form, and record the outcome."""
     from playwright.async_api import async_playwright
     from utils.form_inspector import try_click_apply, scan_fields, format_field_report, extract_apply_url
+    from utils.form_filler import fill_form, format_fill_report
 
     session = SessionLocal()
     try:
@@ -450,6 +454,13 @@ def open_job(job_id, headless):
         if not click.confirm("Open this job?", default=True):
             return
 
+        try:
+            candidate_profile = _load_profile(profile)
+        except Exception as e:
+            logger.error(f"Failed to load profile {profile}: {e}")
+            return
+
+        job_dict = {c.name: getattr(job, c.name) for c in job.__table__.columns}
         target_url = job.url
 
         async def _browser_session():
@@ -489,6 +500,16 @@ def open_job(job_id, headless):
                     click.echo(format_field_report(fields))
                 else:
                     click.echo("\nNo form fields detected yet (may need manual navigation).")
+
+                if fill and fields:
+                    mode = "DRY RUN — " if dry_run else ""
+                    click.echo(f"\n{mode}Filling form from profile...")
+                    actions = await fill_form(active_page, fields, candidate_profile, job_dict, dry_run=dry_run)
+                    click.echo(format_fill_report(actions))
+                    filled = sum(1 for a in actions if a["action"] in ("filled", "checked", "selected"))
+                    skipped = sum(1 for a in actions if a["action"] == "skipped")
+                    errors = sum(1 for a in actions if a["action"] == "error")
+                    click.echo(f"\n  filled={filled}  skipped={skipped}  errors={errors}")
 
                 click.echo("")
                 click.echo("Browser is open. Press ENTER here when you are done.")
