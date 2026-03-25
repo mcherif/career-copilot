@@ -179,11 +179,20 @@ async def fill_form(
 
             if not dry_run:
                 try:
-                    el = await _locate_field(page, field)
+                    # Anonymous fields have no id/name/label to locate by;
+                    # use placeholder + nth-of-type position instead.
+                    if idx in anon_text_position:
+                        el = await _locate_by_position(page, field, anon_text_position[idx])
+                    else:
+                        el = await _locate_field(page, field)
                     if el:
                         await el.fill(value, force=True)
+                    else:
+                        actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
+                                        "action": "error", "value": "element not found"})
+                        continue
                 except Exception as e:
-                    actions.append({"field": label, "type": ftype,
+                    actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
                                     "action": "error", "value": str(e)})
                     continue
 
@@ -265,8 +274,26 @@ async def fill_form(
 
         # ---- file inputs ----------------------------------------------
         elif ftype == "file":
-            actions.append({"field": label or fname, "type": "file",
-                            "action": "skipped", "value": "(file upload not yet handled)"})
+            resume_path = _resolve_resume_path(profile, job)
+            if resume_path and not dry_run:
+                try:
+                    el = await _locate_field(page, field)
+                    if el:
+                        await el.set_input_files(resume_path)
+                        actions.append({"field": label or fname, "type": "file",
+                                        "action": "uploaded", "value": resume_path})
+                    else:
+                        actions.append({"field": label or fname, "type": "file",
+                                        "action": "error", "value": "element not found"})
+                except Exception as e:
+                    actions.append({"field": label or fname, "type": "file",
+                                    "action": "error", "value": str(e)})
+            elif resume_path and dry_run:
+                actions.append({"field": label or fname, "type": "file",
+                                "action": "uploaded", "value": resume_path})
+            else:
+                actions.append({"field": label or fname, "type": "file",
+                                "action": "skipped", "value": "(no resume path resolved)"})
 
     return actions
 
@@ -277,7 +304,7 @@ def format_fill_report(actions: list[dict]) -> str:
         return "  (nothing filled)"
     lines = []
     for a in actions:
-        icon = {"filled": "✓", "checked": "✓", "selected": "✓",
+        icon = {"filled": "✓", "checked": "✓", "selected": "✓", "uploaded": "✓",
                 "skipped": "–", "error": "!"}.get(a["action"], "?")
         value_hint = f" = {repr(a['value'])}" if a["value"] else ""
         lines.append(f"  {icon} [{a['type']}] {a['field']}{value_hint}")
@@ -312,7 +339,7 @@ def _should_check(label_lower: str, profile: dict, job: dict) -> bool | None:
     job_title_words = set(re.findall(r"\w+", job_title)) - {"sr", "jr", "the", "a", "an"}
 
     # Agreement / consent checkboxes — always check.
-    if any(kw in label_lower for kw in ["agree", "i've read", "confirm", "accept", "i understand"]):
+    if any(kw in label_lower for kw in ["agree", "i've read", "confirm", "accept", "i understand", "consent"]):
         return True
 
     # Newsletter opt-in — default yes.
@@ -517,6 +544,76 @@ async def _locate_field(page: Page, field: dict):
         except Exception:
             pass
     return None
+
+
+async def _locate_by_position(page: Page, field: dict, pos: int):
+    """Locate a field that has no id/name/label by placeholder + nth position."""
+    placeholder = field.get("placeholder") or ""
+    tag = field.get("tag") or "input"
+    if placeholder:
+        try:
+            return await page.locator(
+                f'{tag}[placeholder="{placeholder}"]'
+            ).nth(pos).element_handle()
+        except Exception:
+            pass
+    # Fall back to any visible input of the same type at that position.
+    ftype = field.get("type") or "text"
+    try:
+        return await page.locator(
+            f'{tag}[type="{ftype}"]'
+        ).nth(pos).element_handle()
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_resume_path(profile: dict, job: dict) -> str:
+    """Return the local path of the best-matching resume PDF for the job.
+
+    Looks at job.recommended_resume first; if not set, picks the resume
+    whose tags have the most overlap with the job's title words and profile
+    keywords.  Falls back to the first resume in the list.
+    """
+    import os
+
+    resumes = profile.get("resumes") or []
+    if not resumes:
+        return ""
+
+    # If the job carries a recommendation, honour it directly.
+    recommended = (job or {}).get("recommended_resume") or ""
+    if recommended:
+        for r in resumes:
+            if r.get("name") == recommended:
+                path = r.get("path", "")
+                if path and os.path.isfile(path):
+                    return path
+
+    # Score each resume by tag overlap with job title + profile keywords.
+    job_words = set(re.findall(r"\w+", ((job or {}).get("title") or "").lower()))
+    profile_kws = {k.lower() for k in (profile.get("keywords") or [])}
+    combined = job_words | profile_kws
+
+    best_path = ""
+    best_score = -1
+    for r in resumes:
+        tags = {t.lower() for t in (r.get("tags") or [])}
+        score = len(tags & combined)
+        if score > best_score:
+            path = r.get("path", "")
+            if path and os.path.isfile(path):
+                best_score = score
+                best_path = path
+
+    # Last resort: first resume with an existing file.
+    if not best_path:
+        for r in resumes:
+            path = r.get("path", "")
+            if path and os.path.isfile(path):
+                return path
+
+    return best_path
 
 
 def _years_label(profile: dict) -> str:
