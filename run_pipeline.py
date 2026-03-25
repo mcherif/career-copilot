@@ -1,10 +1,11 @@
+import asyncio
 import click
 import yaml
 import datetime
 import json
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from models.database import Base, Job, PipelineRun
+from models.database import Base, Job, PipelineRun, ApplicationHistory
 from connectors.remotive import RemotiveConnector
 from utils.dedup import is_duplicate
 from utils.application_filter import has_already_applied
@@ -408,6 +409,115 @@ def review_command(limit: int):
 def rejected(limit: int):
     """Display rejected jobs with rule and LLM summary fields."""
     _display_jobs_by_status("rejected", limit)
+
+@cli.command(name='open-job')
+@click.option('--job-id', type=int, default=None, help='Specific job ID to open (default: top shortlisted by fit_score)')
+@click.option('--headless', is_flag=True, default=False, help='Run headless (default: headful)')
+def open_job(job_id, headless):
+    """Open a shortlisted job in the browser, inspect the application form, and record the outcome."""
+    from playwright.async_api import async_playwright
+    from utils.form_inspector import try_click_apply, scan_fields, format_field_report
+
+    session = SessionLocal()
+    try:
+        if job_id is not None:
+            job = session.query(Job).filter(Job.id == job_id, Job.status == 'shortlisted').first()
+            if not job:
+                click.echo(f"No shortlisted job with id={job_id} found.")
+                return
+        else:
+            job = (
+                session.query(Job)
+                .filter(Job.status == 'shortlisted', Job.url.isnot(None), Job.url != '')
+                .order_by(Job.fit_score.desc(), Job.id.asc())
+                .first()
+            )
+            if not job:
+                click.echo("No shortlisted jobs with URLs found. Run 'shortlist' to see current queue.")
+                return
+
+        click.echo("")
+        click.echo(f"JOB:     {job.title}")
+        click.echo(f"Company: {job.company}")
+        click.echo(f"Score:   {job.fit_score if job.fit_score is not None else '-'}")
+        if job.recommendation:
+            click.echo(f"LLM:     {job.recommendation} (confidence {job.llm_confidence or '-'})")
+        click.echo(f"Resume:  {job.recommended_resume or '-'}")
+        click.echo(f"ATS:     {job.ats_type or 'unknown'}")
+        click.echo(f"URL:     {job.url}")
+        click.echo("")
+
+        if not click.confirm("Open this job?", default=True):
+            return
+
+        target_url = job.url
+
+        async def _browser_session():
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=headless)
+                page = await browser.new_page()
+
+                try:
+                    await page.goto(target_url, wait_until="load", timeout=30000)
+                except Exception as e:
+                    click.echo(f"Page load error: {e}")
+                    await browser.close()
+                    return
+
+                clicked = await try_click_apply(page)
+                if clicked:
+                    click.echo("Apply button found and clicked.")
+                else:
+                    click.echo("No Apply button detected — showing fields from current page.")
+
+                fields = await scan_fields(page)
+                if fields:
+                    click.echo(f"\nForm fields detected ({len(fields)}, * = required):")
+                    click.echo(format_field_report(fields))
+                else:
+                    click.echo("\nNo form fields detected yet (may need manual navigation).")
+
+                click.echo("")
+                click.echo("Browser is open. Press ENTER here when you are done.")
+                try:
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, input)
+                except Exception:
+                    pass
+
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+
+        try:
+            asyncio.run(_browser_session())
+        except Exception as e:
+            click.echo(f"Browser session ended: {e}")
+
+        click.echo("")
+        if click.confirm("Did you apply?", default=False):
+            job.status = "applied"
+            existing = (
+                session.query(ApplicationHistory)
+                .filter_by(company=job.company, job_title=job.title)
+                .first()
+            )
+            if not existing:
+                history = ApplicationHistory(
+                    company=job.company,
+                    job_title=job.title,
+                    applied_date=datetime.date.today(),
+                    source=job.source or "manual",
+                )
+                session.add(history)
+            session.commit()
+            click.echo(f"Marked as applied: {job.title} @ {job.company}")
+        else:
+            click.echo("No changes recorded.")
+    finally:
+        session.close()
+
 
 if __name__ == '__main__':
     cli()
