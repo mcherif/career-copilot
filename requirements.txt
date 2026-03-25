@@ -6,3 +6,4 @@ click
 colorlog
 python-dotenv
 pyyaml
+playwright

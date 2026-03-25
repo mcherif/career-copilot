@@ -48,7 +48,8 @@ python run_pipeline.py full-run
 [EVALUATE]
   -> compute remote eligibility
   -> compute rule-based fit_score
-  -> assign status
+  -> assign rule_status
+  -> initialize or preserve final status
   -> select recommended resume
 
         |
@@ -64,11 +65,24 @@ Result in `jobs`:
 
 ```text
 job metadata
-rule-based scoring
+rule_status + rule-based scoring
 recommended resume
 LLM reasoning + confidence
 final job status
 ```
+
+State model:
+
+- Deterministic layer:
+  - `rule_status`
+  - `fit_score`
+- Semantic layer:
+  - `llm_fit_score`
+  - `recommendation`
+  - `llm_confidence`
+  - `llm_status`
+- Final decision layer:
+  - `status`
 
 ---
 
@@ -76,9 +90,12 @@ final job status
 
 ### Job Sources
 
-Supported sources:
+Implemented sources:
 
 - Remotive API
+
+Planned sources (stubs exist, not yet tested):
+
 - RemoteOK JSON endpoint
 - Greenhouse company boards
 
@@ -114,6 +131,8 @@ Tables:
 - `application_history`
 - `pipeline_runs`
 
+The `jobs` table now intentionally separates deterministic and final decision state so reevaluation does not overwrite LLM-refined outcomes.
+
 ### Career Intelligence Engine
 
 Evaluates job relevance using:
@@ -126,9 +145,16 @@ Evaluates job relevance using:
 The `evaluate` step persists deterministic fields back to the `jobs` table:
 
 - `fit_score`
+- `rule_status`
 - `remote_eligibility`
 - `recommended_resume`
-- `status`
+
+Evaluation policy:
+
+- newly fetched jobs start as `status='new'`
+- `evaluate` always refreshes `rule_status`
+- `evaluate` only initializes or updates final `status` when the job has not already been refined by a successful LLM analysis
+- this prevents `evaluate --all-jobs` from erasing previous LLM promotions or rejections
 
 ### LLM Job Analysis
 
@@ -150,21 +176,34 @@ The current implementation uses the Ollama `/api/chat` endpoint with structured 
   - `recommendation`
   - `llm_confidence`
   - `llm_status`
+- LLM analysis updates the final operational `status`, but does not overwrite `rule_status`
+
+### Human Review Commands
+
+The current CLI includes human-facing review shortcuts for inspecting the queue without querying SQLite directly:
+
+- `python run_pipeline.py shortlist`
+- `python run_pipeline.py review`
+- `python run_pipeline.py rejected`
+
+These commands present the current final `status`, rule-based score, LLM recommendation, LLM confidence, and recommended resume in a review-friendly format.
 
 ### Application Prefill Agent
 
-Playwright-based automation supports:
+> **Not yet implemented.** A proof-of-concept (`playground_playwright.py`) exists that opens a shortlisted job URL in a Chromium browser via Playwright. Full ATS-specific form detection and field prefilling has not been built yet.
+
+Planned support:
 
 - Greenhouse
 - Lever
 
-Unsupported platforms fall back to manual mode.
+Unsupported platforms will fall back to manual mode.
 
 ### Human Approval Gate
 
-Every application must be reviewed before submission.
+> **Not yet implemented.** Human review is currently done via the CLI review commands (`shortlist`, `review`, `rejected`), which display job details without triggering any submission.
 
-Users can:
+Planned behaviour once implemented:
 
 - approve
 - edit
@@ -172,7 +211,9 @@ Users can:
 
 ### Application Submission
 
-After approval:
+> **Not yet implemented.**
+
+Planned behaviour once implemented:
 
 - the application is submitted
 - the result is logged

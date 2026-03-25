@@ -17,12 +17,17 @@ The goal is **assistive automation, not blind automation**.
 
 ## Core Features
 
-Career Copilot helps automate the most repetitive parts of the job search process:
+Career Copilot helps automate the most repetitive parts of the job search process.
+
+**Implemented:**
 
 - Discover remote jobs from multiple sources
 - Normalize and deduplicate job listings
 - Evaluate jobs against your skills and preferences
 - Generate explanations for why a job fits your profile
+
+**Planned:**
+
 - Prefill application forms on supported job platforms
 - Require **explicit human approval** before submission
 
@@ -61,7 +66,8 @@ python run_pipeline.py full-run
 [EVALUATE]
   -> compute remote eligibility
   -> compute rule-based fit_score
-  -> assign status
+  -> assign rule_status
+  -> initialize or preserve final status
   -> select recommended resume
 
         |
@@ -77,11 +83,17 @@ Result: `jobs` table
 
 ```text
 job metadata
-rule-based scoring
+rule_status + rule-based scoring
 recommended resume
 LLM reasoning + confidence
 final job status
 ```
+
+State model:
+
+- Deterministic layer: `rule_status`, `fit_score`
+- Semantic layer: `llm_fit_score`, `recommendation`, `llm_confidence`, `llm_status`
+- Final decision layer: `status`
 
 Example production command:
 
@@ -92,6 +104,14 @@ python run_pipeline.py full-run `
   --model qwen2.5:7b `
   --analyze-status review `
   --analyze-limit 10
+```
+
+Human-facing review commands:
+
+```powershell
+python run_pipeline.py shortlist
+python run_pipeline.py review
+python run_pipeline.py rejected
 ```
 
 Full technical documentation:

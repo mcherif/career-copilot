@@ -29,6 +29,25 @@ REVIEW_KEYWORDS = [
     "remote-first",
 ]
 
+STRICT_REJECT_LOCATION_PATTERNS = [
+    r"^us$",
+    r"^u\.s\.$",
+    r"^usa$",
+    r"^united states$",
+    r"^us only$",
+    r"^usa only$",
+    r"^united states only$",
+    r"^remote us$",
+    r"^remote usa$",
+    r"^remote united states$",
+]
+
+STRICT_ACCEPT_LOCATIONS = {
+    "worldwide",
+    "global",
+    "anywhere",
+}
+
 MIXED_REGION_HINTS = [
     "americas",
     "asia",
@@ -58,6 +77,11 @@ def _token_in_text(token: str, text: str) -> bool:
     pattern = r"(?<!\w)" + re.escape(token) + r"(?!\w)"
     return re.search(pattern, text) is not None
 
+def _matches_location_pattern(patterns: Iterable[str], text: str) -> bool:
+    if not text:
+        return False
+    return any(re.search(pattern, text) is not None for pattern in patterns)
+
 def classify_remote_eligibility(job: Dict[str, Any], profile: Dict[str, Any] | None = None) -> str:
     """Classify a job listing as accept, review, or reject for remote eligibility."""
     raw_location = str(job.get("raw_location_text") or job.get("location") or "").strip().lower()
@@ -76,6 +100,7 @@ def classify_remote_eligibility(job: Dict[str, Any], profile: Dict[str, Any] | N
         if allowed and str(region).strip()
     )
     accepted_regions.extend(["worldwide", "global", "anywhere", "remote anywhere"])
+    accepted_region_set = set(accepted_regions)
 
     if _phrase_in_text(DEFAULT_REJECT_KEYWORDS, combined_text):
         return "reject"
@@ -83,11 +108,15 @@ def classify_remote_eligibility(job: Dict[str, Any], profile: Dict[str, Any] | N
     if _phrase_in_text(reject_regions, combined_text):
         return "reject"
 
-    if raw_location in {"worldwide", "global", "anywhere"}:
+    if raw_location in STRICT_ACCEPT_LOCATIONS:
         return "accept"
 
     if _phrase_in_text(DEFAULT_ACCEPT_KEYWORDS, combined_text):
         return "accept"
+
+    if _matches_location_pattern(STRICT_REJECT_LOCATION_PATTERNS, raw_location):
+        if not ({"us", "usa", "united states"} & accepted_region_set):
+            return "reject"
 
     accepted_hit = any(_token_in_text(region, raw_location) for region in accepted_regions)
     mixed_region_hit = any(_token_in_text(region, raw_location) for region in MIXED_REGION_HINTS)
