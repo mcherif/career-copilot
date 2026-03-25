@@ -181,8 +181,7 @@ async def fill_form(
                 try:
                     el = await _locate_field(page, field)
                     if el:
-                        await el.click()
-                        await el.fill(value)
+                        await el.fill(value, force=True)
                 except Exception as e:
                     actions.append({"field": label, "type": ftype,
                                     "action": "error", "value": str(e)})
@@ -203,7 +202,7 @@ async def fill_form(
                 try:
                     el = await _locate_field(page, field)
                     if el and not await el.is_checked():
-                        await el.check()
+                        await el.check(force=True)
                 except Exception as e:
                     actions.append({"field": label, "type": "checkbox",
                                     "action": "error", "value": str(e)})
@@ -244,7 +243,7 @@ async def fill_form(
                     try:
                         el = await _locate_field(page, chosen_field)
                         if el:
-                            await el.check()
+                            await el.check(force=True)
                     except Exception as e:
                         actions.append({"field": group_display, "type": "radio",
                                         "action": "error", "value": str(e)})
@@ -395,23 +394,19 @@ def _pick_radio(
 
 
 async def _build_context_map(page: Page, fields: list[dict]) -> dict[int, str]:
-    """Look up the DOM for the nearest preceding text block for each field.
+    """Look up the DOM for the nearest preceding text block for fields that
+    have no label or placeholder of their own (e.g. Notion anonymous inputs).
 
-    For radio/checkbox fields the label is the option text, not the question,
-    so we always look up context for those regardless of whether label is set.
-    For other field types we skip ones that already have a meaningful label
-    or placeholder.
+    Radio/checkbox fields are skipped — their label IS the option text, and
+    resolving context for all 160+ of them triggers Notion's lazy-render
+    scroll.  Radio group display names fall back to the selected option label.
 
-    Returns a dict mapping field-index → context string (question label).
+    Returns a dict mapping field-index → context string.
     """
     context_map: dict[int, str] = {}
     for idx, field in enumerate(fields):
-        ftype = field.get("type")
-        # Always resolve context for radio/checkbox — their label is the option
-        # value, not the question.  For text-like fields, skip if already labeled.
-        if ftype not in ("radio", "checkbox"):
-            if field.get("label") or field.get("placeholder"):
-                continue
+        if field.get("label") or field.get("placeholder"):
+            continue
         try:
             context = await _get_dom_context(page, field)
             if context:
