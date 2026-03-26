@@ -32,6 +32,7 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["name"],         lambda p, j: p.get("personal", {}).get("name", "")),
     (["email"],        lambda p, j: p.get("personal", {}).get("email", "")),
     (["phone"],        lambda p, j: p.get("personal", {}).get("phone", "")),
+    (["country"],      lambda p, j: p.get("personal", {}).get("phone_country", "") or p.get("personal", {}).get("location", "").split(",")[-1].strip()),
     (["linkedin"],     lambda p, j: p.get("personal", {}).get("linkedin", "")),
     (["portfolio"],    lambda p, j: p.get("personal", {}).get("website", "")),
     (["website"],      lambda p, j: p.get("personal", {}).get("website", "")),
@@ -269,8 +270,40 @@ async def fill_form(
 
         # ---- select dropdowns -----------------------------------------
         elif ftype == "select":
-            actions.append({"field": label or fname, "type": "select",
-                            "action": "skipped", "value": "(select not yet handled)"})
+            value = _resolve_text_value(label_lower, profile, job)
+            if value and not dry_run:
+                try:
+                    el = await _locate_field(page, field)
+                    if el:
+                        # Try label match first, then value, then partial label.
+                        try:
+                            await el.select_option(label=value)
+                        except Exception:
+                            try:
+                                await el.select_option(value=value)
+                            except Exception:
+                                # Partial match: find an option containing the value.
+                                options = await el.query_selector_all("option")
+                                for opt in options:
+                                    text = (await opt.inner_text()).strip()
+                                    if value.lower() in text.lower():
+                                        opt_val = await opt.get_attribute("value") or text
+                                        await el.select_option(value=opt_val)
+                                        break
+                        actions.append({"field": label or fname, "type": "select",
+                                        "action": "selected", "value": value})
+                    else:
+                        actions.append({"field": label or fname, "type": "select",
+                                        "action": "error", "value": "element not found"})
+                except Exception as e:
+                    actions.append({"field": label or fname, "type": "select",
+                                    "action": "error", "value": str(e)})
+            elif value and dry_run:
+                actions.append({"field": label or fname, "type": "select",
+                                "action": "selected", "value": value})
+            else:
+                actions.append({"field": label or fname, "type": "select",
+                                "action": "skipped", "value": ""})
 
         # ---- file inputs ----------------------------------------------
         elif ftype == "file":
@@ -298,6 +331,52 @@ async def fill_form(
     return actions
 
 
+async def try_upload_resume(
+    page: Page,
+    profile: dict,
+    job: dict,
+    dry_run: bool = False,
+) -> str:
+    """Attempt to upload the resume via a custom file-picker button (e.g. Notion).
+
+    Looks for any visible button/label whose text contains 'upload' near a
+    'resume' heading.  Uses Playwright's expect_file_chooser() to intercept
+    the native file dialog before it opens and set the file programmatically.
+
+    Returns a status string: 'uploaded', 'skipped', or an error message.
+    """
+    resume_path = _resolve_resume_path(profile, job)
+    if not resume_path:
+        return "skipped (no resume path resolved)"
+
+    if dry_run:
+        return f"would upload {resume_path}"
+
+    # Selectors for common upload trigger buttons.
+    upload_selectors = [
+        "button:has-text('Upload')",
+        "label:has-text('Upload')",
+        "[role='button']:has-text('Upload')",
+        "button:has-text('Choose file')",
+        "button:has-text('Browse')",
+    ]
+
+    for selector in upload_selectors:
+        try:
+            btn = page.locator(selector).first
+            if await btn.count() == 0 or not await btn.is_visible(timeout=1500):
+                continue
+            async with page.expect_file_chooser(timeout=5000) as fc_info:
+                await btn.click()
+            fc = await fc_info.value
+            await fc.set_files(resume_path)
+            return f"uploaded {resume_path}"
+        except Exception:
+            continue
+
+    return "skipped (no upload button found)"
+
+
 def format_fill_report(actions: list[dict]) -> str:
     """Format the fill action list into a human-readable summary."""
     if not actions:
@@ -316,8 +395,17 @@ def format_fill_report(actions: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 def _effective_label(field: dict, context: str) -> str:
-    """Return the best available label for a field."""
-    return field.get("label") or field.get("placeholder") or context or ""
+    """Return the best available label for a field.
+
+    Generic placeholders like 'Your answer' are not real labels — skip them
+    so that DOM-derived context can be used instead.
+    """
+    if field.get("label"):
+        return field["label"]
+    placeholder = field.get("placeholder") or ""
+    if placeholder and placeholder.lower() not in _GENERIC_PLACEHOLDERS:
+        return placeholder
+    return context or ""
 
 
 def _resolve_text_value(label_lower: str, profile: dict, job: dict) -> str:
@@ -339,7 +427,14 @@ def _should_check(label_lower: str, profile: dict, job: dict) -> bool | None:
     job_title_words = set(re.findall(r"\w+", job_title)) - {"sr", "jr", "the", "a", "an"}
 
     # Agreement / consent checkboxes — always check.
-    if any(kw in label_lower for kw in ["agree", "i've read", "confirm", "accept", "i understand", "consent"]):
+    # Normalize apostrophes before matching (curly vs straight).
+    label_norm = label_lower.replace("\u2019", "'").replace("\u2018", "'")
+    if any(kw in label_norm for kw in ["agree", "i've read", "confirm", "accept", "i understand", "consent"]):
+        return True
+
+    # Availability / engagement preferences from profile.
+    availability = [a.lower() for a in (profile.get("preferences", {}).get("availability") or [])]
+    if availability and any(av in label_lower for av in availability):
         return True
 
     # Newsletter opt-in — default yes.
@@ -376,9 +471,12 @@ def _should_check(label_lower: str, profile: dict, job: dict) -> bool | None:
         if kw in core_label:
             return True
 
-    # Career type — check the developer/engineer option.
+    # Career type — check the developer/engineer option, but not creative
+    # hybrids like "Design Engineer (I've mostly coded up my own designs)".
+    _CREATIVE_WORDS = {"design", "pixel", "illustrat", "artist", "3d", "animation"}
     if any(dev in core_label for dev in _DEVELOPER_LABELS):
-        return True
+        if not any(c in core_label for c in _CREATIVE_WORDS):
+            return True
 
     return None  # don't touch
 
@@ -428,18 +526,82 @@ async def _build_context_map(page: Page, fields: list[dict]) -> dict[int, str]:
     resolving context for all 160+ of them triggers Notion's lazy-render
     scroll.  Radio group display names fall back to the selected option label.
 
+    For fully anonymous fields (no id, no name, generic placeholder) a single
+    batch JS call retrieves context by DOM position without individual lookups.
+
     Returns a dict mapping field-index → context string.
     """
     context_map: dict[int, str] = {}
+
+    # Fields with id or name: walk DOM per element (cheap, few of these).
     for idx, field in enumerate(fields):
         if field.get("label") or field.get("placeholder"):
             continue
+        if not field.get("id") and not field.get("name"):
+            continue  # handled by batch below
         try:
             context = await _get_dom_context(page, field)
             if context:
                 context_map[idx] = context
         except Exception:
             pass
+
+    # Fully anonymous fields (no id, no name): one JS call to get context
+    # for all of them in DOM order, then map back to field indices.
+    anon_indices = [
+        idx for idx, f in enumerate(fields)
+        if not f.get("id") and not f.get("name") and not f.get("label")
+        and f.get("type") not in ("checkbox", "radio")
+    ]
+    if anon_indices:
+        placeholder = fields[anon_indices[0]].get("placeholder") or "Your answer"
+        tag = fields[anon_indices[0]].get("tag") or "input"
+        try:
+            batch: list[str] = await page.evaluate(
+                """([tag, ph]) => {
+                    const sel = ph
+                        ? tag + '[placeholder="' + ph + '"], textarea[placeholder="' + ph + '"]'
+                        : tag + ', textarea';
+                    const inputs = Array.from(document.querySelectorAll(sel))
+                        .filter(el => el.offsetParent !== null);
+                    if (!inputs.length) return [];
+
+                    // Single pass: walk all nodes in document order.
+                    // Track the last short text seen; when we hit a target
+                    // input, that text is its label.  Reset after each input
+                    // so labels don't bleed across questions.
+                    const results = new Array(inputs.length).fill('');
+                    let lastText = '';
+                    let nextIdx = 0;
+                    const walker = document.createTreeWalker(
+                        document.body, NodeFilter.SHOW_ALL
+                    );
+                    let node;
+                    while ((node = walker.nextNode()) && nextIdx < inputs.length) {
+                        if (node.nodeType === Node.TEXT_NODE) {
+                            const pTag = node.parentElement
+                                ? node.parentElement.tagName.toLowerCase() : '';
+                            if (pTag !== 'style' && pTag !== 'script') {
+                                const t = node.textContent.trim();
+                                if (t.length > 2 && t.length < 150) lastText = t;
+                            }
+                        } else if (node.nodeType === Node.ELEMENT_NODE
+                                   && node === inputs[nextIdx]) {
+                            results[nextIdx] = lastText;
+                            lastText = '';
+                            nextIdx++;
+                        }
+                    }
+                    return results;
+                }""",
+                [tag, placeholder],
+            )
+            for pos, idx in enumerate(anon_indices):
+                if pos < len(batch) and batch[pos]:
+                    context_map[idx] = batch[pos]
+        except Exception:
+            pass
+
     return context_map
 
 

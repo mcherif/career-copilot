@@ -1,5 +1,12 @@
+import sys
 import asyncio
 import click
+
+# Force UTF-8 output on Windows so Unicode chars (e.g. UTC −08:00) don't crash.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore
 import yaml
 import datetime
 import json
@@ -117,11 +124,11 @@ def _run_evaluate(profile: str, dry_run: bool, all_jobs: bool):
     try:
         query = session.query(Job)
         if all_jobs:
-            jobs_to_evaluate = query.filter(Job.status != "applied").all()
+            jobs_to_evaluate = query.filter(Job.status.notin_(["applied", "deferred"])).all()
         else:
             jobs_to_evaluate = query.filter(Job.status == "new").all()
         total_eval = len(jobs_to_evaluate)
-        scope = "non-applied" if all_jobs else "new"
+        scope = "non-applied/non-deferred" if all_jobs else "new"
         logger.info(f"Found {total_eval} {scope} jobs to evaluate.")
         
         counts = {"shortlisted": 0, "review": 0, "rejected": 0, "applied": 0, "errors": 0}
@@ -315,7 +322,7 @@ def _display_jobs_by_status(target_status: str, limit: int):
             recommendation = job.recommendation or "-"
             confidence = job.llm_confidence if job.llm_confidence is not None else "-"
             resume = job.recommended_resume or "-"
-            click.echo(f"{idx}. {job.title} -- {job.company}")
+            click.echo(f"{idx}. [id={job.id}] {job.title} -- {job.company}")
             click.echo(f"Score: {fit_score}")
 
             if recommendation != "-" and confidence != "-":
@@ -410,6 +417,12 @@ def rejected(limit: int):
     """Display rejected jobs with rule and LLM summary fields."""
     _display_jobs_by_status("rejected", limit)
 
+@cli.command()
+@click.option('--limit', default=20, type=int, show_default=True, help='Maximum number of deferred jobs to display')
+def deferred(limit: int):
+    """Display deferred jobs (unsupported ATS, pending better support)."""
+    _display_jobs_by_status("deferred", limit)
+
 @cli.command(name='open-job')
 @click.option('--job-id', type=int, default=None, help='Specific job ID to open (default: top shortlisted by fit_score)')
 @click.option('--profile', default='profile.yaml', help='Path to candidate profile YAML')
@@ -420,135 +433,168 @@ def open_job(job_id, profile, headless, fill, dry_run):
     """Open a shortlisted job in the browser, inspect the application form, and record the outcome."""
     from playwright.async_api import async_playwright
     from utils.form_inspector import try_click_apply, scan_fields, format_field_report, extract_apply_url
-    from utils.form_filler import fill_form, format_fill_report
+    from utils.form_filler import fill_form, format_fill_report, try_upload_resume
+    from utils.ats_detector import detect_ats, MANUAL_ONLY_ATS
+
+    try:
+        candidate_profile = _load_profile(profile)
+    except Exception as e:
+        logger.error(f"Failed to load profile {profile}: {e}")
+        return
 
     session = SessionLocal()
+    seen_ids: set[int] = set()
     try:
-        if job_id is not None:
-            job = session.query(Job).filter(Job.id == job_id, Job.status == 'shortlisted').first()
-            if not job:
-                click.echo(f"No shortlisted job with id={job_id} found.")
-                return
-        else:
-            job = (
-                session.query(Job)
-                .filter(Job.status == 'shortlisted', Job.url.isnot(None), Job.url != '')
-                .order_by(Job.fit_score.desc(), Job.id.asc())
-                .first()
-            )
-            if not job:
-                click.echo("No shortlisted jobs with URLs found. Run 'shortlist' to see current queue.")
-                return
-
-        click.echo("")
-        click.echo(f"JOB:     {job.title}")
-        click.echo(f"Company: {job.company}")
-        click.echo(f"Score:   {job.fit_score if job.fit_score is not None else '-'}")
-        if job.recommendation:
-            click.echo(f"LLM:     {job.recommendation} (confidence {job.llm_confidence or '-'})")
-        click.echo(f"Resume:  {job.recommended_resume or '-'}")
-        click.echo(f"ATS:     {job.ats_type or 'unknown'}")
-        click.echo(f"URL:     {job.url}")
-        click.echo("")
-
-        if not click.confirm("Open this job?", default=True):
-            return
-
-        try:
-            candidate_profile = _load_profile(profile)
-        except Exception as e:
-            logger.error(f"Failed to load profile {profile}: {e}")
-            return
-
-        job_dict = {c.name: getattr(job, c.name) for c in job.__table__.columns}
-        target_url = job.url
-
-        async def _browser_session():
-            async with async_playwright() as pw:
-                browser = await pw.chromium.launch(headless=headless)
-                page = await browser.new_page()
-
-                try:
-                    await page.goto(target_url, wait_until="load", timeout=30000)
-                except Exception as e:
-                    click.echo(f"Page load error: {e}")
-                    await browser.close()
+        while True:
+            if job_id is not None:
+                job = session.query(Job).filter(Job.id == job_id, Job.status == 'shortlisted').first()
+                if not job:
+                    click.echo(f"No shortlisted job with id={job_id} found.")
+                    return
+            else:
+                job = (
+                    session.query(Job)
+                    .filter(
+                        Job.status == 'shortlisted',
+                        Job.url.isnot(None),
+                        Job.url != '',
+                        Job.id.notin_(seen_ids),
+                    )
+                    .order_by(Job.fit_score.desc(), Job.id.asc())
+                    .first()
+                )
+                if not job:
+                    click.echo("No more shortlisted jobs. All done!")
                     return
 
-                # On listing aggregators (Remotive etc.) try to resolve the
-                # direct employer apply URL before doing anything else.
-                resolved = await extract_apply_url(page)
-                if resolved and resolved != target_url:
-                    click.echo(f"Resolved apply URL: {resolved}")
+            click.echo("")
+            click.echo(f"JOB:     {job.title}")
+            click.echo(f"Company: {job.company}")
+            click.echo(f"Score:   {job.fit_score if job.fit_score is not None else '-'}")
+            if job.recommendation:
+                click.echo(f"LLM:     {job.recommendation} (confidence {job.llm_confidence or '-'})")
+            click.echo(f"Resume:  {job.recommended_resume or '-'}")
+            click.echo(f"ATS:     {job.ats_type or 'unknown'}")
+            click.echo(f"URL:     {job.url}")
+            click.echo("")
+
+            if not click.confirm("Open this job?", default=True):
+                return
+
+            job_dict = {c.name: getattr(job, c.name) for c in job.__table__.columns}
+            target_url = job.url
+            session_result = {"outcome": "done"}  # mutable sentinel shared with async closure
+
+            async def _browser_session():
+                async with async_playwright() as pw:
+                    browser = await pw.chromium.launch(headless=headless)
+                    page = await browser.new_page()
+
                     try:
-                        await page.goto(resolved, wait_until="load", timeout=30000)
-                        await page.wait_for_timeout(2000)
+                        await page.goto(target_url, wait_until="load", timeout=30000)
                     except Exception as e:
-                        click.echo(f"Could not navigate to resolved URL: {e}")
+                        click.echo(f"Page load error: {e}")
+                        await browser.close()
+                        return
 
-                active_page = page
-                clicked, active_page = await try_click_apply(active_page)
-                if clicked:
-                    click.echo(f"Apply button clicked. Now at: {active_page.url}")
-                    await active_page.wait_for_timeout(2000)
-                else:
-                    click.echo("No Apply button detected — scanning current page.")
+                    # On listing aggregators (Remotive etc.) try to resolve the
+                    # direct employer apply URL before doing anything else.
+                    resolved = await extract_apply_url(page)
+                    if resolved and resolved != target_url:
+                        click.echo(f"Resolved apply URL: {resolved}")
+                        try:
+                            await page.goto(resolved, wait_until="load", timeout=30000)
+                            await page.wait_for_timeout(2000)
+                        except Exception as e:
+                            click.echo(f"Could not navigate to resolved URL: {e}")
 
-                fields = await scan_fields(active_page)
-                if fields:
-                    click.echo(f"\nForm fields detected ({len(fields)}, * = required):")
-                    click.echo(format_field_report(fields))
-                else:
-                    click.echo("\nNo form fields detected yet (may need manual navigation).")
+                    active_page = page
+                    clicked, active_page = await try_click_apply(active_page)
+                    if clicked:
+                        click.echo(f"Apply button clicked. Now at: {active_page.url}")
+                        await active_page.wait_for_timeout(2000)
+                    else:
+                        click.echo("No Apply button detected — scanning current page.")
 
-                if fill and fields:
-                    mode = "DRY RUN — " if dry_run else ""
-                    click.echo(f"\n{mode}Filling form from profile...")
-                    actions = await fill_form(active_page, fields, candidate_profile, job_dict, dry_run=dry_run)
-                    click.echo(format_fill_report(actions))
-                    filled = sum(1 for a in actions if a["action"] in ("filled", "checked", "selected"))
-                    skipped = sum(1 for a in actions if a["action"] == "skipped")
-                    errors = sum(1 for a in actions if a["action"] == "error")
-                    click.echo(f"\n  filled={filled}  skipped={skipped}  errors={errors}")
+                    ats = detect_ats(active_page.url)
+                    if ats in MANUAL_ONLY_ATS:
+                        click.echo(f"\nATS '{ats}' — auto-fill not supported for this platform.")
+                        if not click.confirm("Fill manually in the browser?", default=True):
+                            click.echo("Skipping — browser will close.")
+                            session_result["outcome"] = "skipped"
+                            await browser.close()
+                            return
 
-                click.echo("")
-                click.echo("Browser is open. Press ENTER here when you are done.")
-                try:
-                    loop = asyncio.get_running_loop()
-                    await loop.run_in_executor(None, input)
-                except Exception:
-                    pass
+                    fields = await scan_fields(active_page)
+                    if fields:
+                        click.echo(f"\nForm fields detected ({len(fields)}, * = required):")
+                        click.echo(format_field_report(fields))
+                    else:
+                        click.echo("\nNo form fields detected yet (may need manual navigation).")
 
-                try:
-                    await browser.close()
-                except Exception:
-                    pass
+                    if fill and fields and ats not in MANUAL_ONLY_ATS:
+                        mode = "DRY RUN — " if dry_run else ""
+                        click.echo(f"\n{mode}Filling form from profile...")
+                        actions = await fill_form(active_page, fields, candidate_profile, job_dict, dry_run=dry_run)
+                        click.echo(format_fill_report(actions))
+                        filled = sum(1 for a in actions if a["action"] in ("filled", "checked", "selected"))
+                        skipped = sum(1 for a in actions if a["action"] == "skipped")
+                        errors = sum(1 for a in actions if a["action"] == "error")
+                        click.echo(f"\n  filled={filled}  skipped={skipped}  errors={errors}")
 
-        try:
-            asyncio.run(_browser_session())
-        except Exception as e:
-            click.echo(f"Browser session ended: {e}")
+                    if fill and ats not in MANUAL_ONLY_ATS:
+                        resume_status = await try_upload_resume(active_page, candidate_profile, job_dict, dry_run=dry_run)
+                        click.echo(f"  resume: {resume_status}")
 
-        click.echo("")
-        if click.confirm("Did you apply?", default=False):
-            job.status = "applied"
-            existing = (
-                session.query(ApplicationHistory)
-                .filter_by(company=job.company, job_title=job.title)
-                .first()
-            )
-            if not existing:
-                history = ApplicationHistory(
-                    company=job.company,
-                    job_title=job.title,
-                    applied_date=datetime.date.today(),
-                    source=job.source or "manual",
+                    click.echo("")
+                    click.echo("Browser is open. Press ENTER here when you are done.")
+                    try:
+                        loop = asyncio.get_running_loop()
+                        await loop.run_in_executor(None, input)
+                    except Exception:
+                        pass
+
+                    try:
+                        await browser.close()
+                    except Exception:
+                        pass
+
+            try:
+                asyncio.run(_browser_session())
+            except Exception as e:
+                click.echo(f"Browser session ended: {e}")
+
+            if session_result["outcome"] == "skipped":
+                seen_ids.add(job.id)
+                continue
+
+            click.echo("")
+            if click.confirm("Did you apply?", default=False):
+                job.status = "applied"
+                existing = (
+                    session.query(ApplicationHistory)
+                    .filter_by(company=job.company, job_title=job.title)
+                    .first()
                 )
-                session.add(history)
-            session.commit()
-            click.echo(f"Marked as applied: {job.title} @ {job.company}")
-        else:
-            click.echo("No changes recorded.")
+                if not existing:
+                    history = ApplicationHistory(
+                        company=job.company,
+                        job_title=job.title,
+                        applied_date=datetime.date.today(),
+                        source=job.source or "manual",
+                    )
+                    session.add(history)
+                session.commit()
+                click.echo(f"Marked as applied: {job.title} @ {job.company}")
+            else:
+                click.echo("No changes recorded.")
+
+            # After each job (applied or not), stop if a specific id was requested.
+            if job_id is not None:
+                return
+
+            seen_ids.add(job.id)
+
     finally:
         session.close()
 

@@ -5,7 +5,12 @@ ATS_PATTERNS = {
     "ashby": ["ashbyhq.com"],
     "smartrecruiters": ["smartrecruiters.com"],
     "notion": ["notion.so", "notion.site"],
+    "recruitee": ["recruitee.com"],
+    "ateam": ["a.team", "onboarding.a.team"],
 }
+
+# ATS platforms that use custom React/SPA forms incompatible with scan_fields.
+MANUAL_ONLY_ATS = {"ateam", "workday"}
 
 def detect_ats(url: str) -> str:
     """Detect ATS from job URL.
