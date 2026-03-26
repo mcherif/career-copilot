@@ -14,6 +14,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from models.database import Base, Job, PipelineRun, ApplicationHistory
 from connectors.remotive import RemotiveConnector
+from connectors.remoteok import RemoteOKConnector
+from connectors.weworkremotely import WeWorkRemotelyConnector
+from connectors.arbeitnow import ArbeitnowConnector
+from connectors.jobicy import JobicyConnector
 from utils.dedup import is_duplicate
 from utils.application_filter import has_already_applied
 from utils.llm_analysis import analyze_job_with_ollama
@@ -26,7 +30,10 @@ logger = setup_logger("run_pipeline")
 
 CONNECTORS = {
     "remotive": RemotiveConnector,
-    # "remoteok": RemoteOKConnector,  # Will uncomment when implemented
+    "remoteok": RemoteOKConnector,
+    "weworkremotely": WeWorkRemotelyConnector,
+    "arbeitnow": ArbeitnowConnector,
+    "jobicy": JobicyConnector,
 }
 
 engine = create_engine(config.DATABASE_URL)
@@ -45,9 +52,14 @@ def _should_preserve_final_status(job: Job) -> bool:
     return bool(job.llm_status == "completed" and job.status not in (None, "new", "applied"))
 
 def _run_fetch(source: str, dry_run: bool):
+    if source == "all":
+        for s in CONNECTORS:
+            _run_fetch(s, dry_run)
+        return
+
     if source not in CONNECTORS:
-        logger.warning(f"Source '{source}' not fully implemented. Defaulting to 'remotive'.")
-        source = 'remotive'
+        logger.warning(f"Unknown source '{source}'. Available: {', '.join(CONNECTORS)}.")
+        return
 
     logger.info(f"Starting fetch for source '{source}' (dry_run={dry_run})")
 
@@ -340,7 +352,7 @@ def _display_jobs_by_status(target_status: str, limit: int):
         session.close()
 
 @cli.command()
-@click.option('--source', required=True, type=click.Choice(['remotive', 'remoteok', 'all']), help='Job source to fetch from')
+@click.option('--source', required=True, type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'all']), help='Job source to fetch from')
 @click.option('--dry-run', is_flag=True, help='Run pipeline without inserting jobs into database')
 def fetch(source: str, dry_run: bool):
     """Fetch remote jobs from the specified source."""
@@ -375,7 +387,7 @@ def analyze(profile: str, model: str, target_status: str, limit: int, dry_run: b
     _run_analyze(profile, model, target_status, limit, dry_run)
 
 @cli.command(name='full-run')
-@click.option('--source', default='remotive', type=click.Choice(['remotive', 'remoteok', 'all']), show_default=True, help='Job source to fetch from')
+@click.option('--source', default='all', type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'all']), show_default=True, help='Job source to fetch from')
 @click.option('--profile', default='profile.yaml', help='Path to candidate profile YAML')
 @click.option('--model', default=config.OLLAMA_MODEL, help='Ollama model name')
 @click.option('--analyze-status', default=config.LLM_STATUS_DEFAULT, type=click.Choice(['review', 'shortlisted', 'rejected']), show_default=True, help='Job status bucket to analyze after evaluation')
