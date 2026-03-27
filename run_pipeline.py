@@ -509,7 +509,8 @@ def open_job(job_id, queue_status, profile, headless, fill, dry_run):
             click.echo("")
 
             if not click.confirm("Open this job?", default=True):
-                seen_ids.add(job.id)
+                seen_ids.add(int(job.id))
+                session.expire_all()
                 continue
 
             job_dict = {c.name: getattr(job, c.name) for c in job.__table__.columns}
@@ -636,6 +637,7 @@ def open_job(job_id, queue_status, profile, headless, fill, dry_run):
 
             if session_result["outcome"] == "skipped":
                 seen_ids.add(job.id)
+                session.expire_all()
                 continue
 
             click.echo("")
@@ -664,6 +666,7 @@ def open_job(job_id, queue_status, profile, headless, fill, dry_run):
                 return
 
             seen_ids.add(job.id)
+            session.expire_all()
 
     finally:
         session.close()
