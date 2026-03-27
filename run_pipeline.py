@@ -453,13 +453,14 @@ def deferred(limit: int):
     _display_jobs_by_status("deferred", limit)
 
 @cli.command(name='open-job')
-@click.option('--job-id', type=int, default=None, help='Specific job ID to open (default: top shortlisted by fit_score)')
+@click.option('--job-id', type=int, default=None, help='Specific job ID to open (any status)')
+@click.option('--status', 'queue_status', default='shortlisted', type=click.Choice(['shortlisted', 'review']), show_default=True, help='Queue to work through when no --job-id given')
 @click.option('--profile', default='profile.yaml', help='Path to candidate profile YAML')
 @click.option('--headless', is_flag=True, default=False, help='Run headless (default: headful)')
 @click.option('--fill/--no-fill', default=True, help='Auto-fill detected form fields from profile (default: on)')
 @click.option('--dry-run', is_flag=True, default=False, help='Show what would be filled without touching the form')
-def open_job(job_id, profile, headless, fill, dry_run):
-    """Open a shortlisted job in the browser, inspect the application form, and record the outcome."""
+def open_job(job_id, queue_status, profile, headless, fill, dry_run):
+    """Open a shortlisted (or review) job in the browser, inspect the form, and record the outcome."""
     from playwright.async_api import async_playwright
     from utils.form_inspector import try_click_apply, scan_fields, format_field_report, extract_apply_url
     from utils.form_filler import fill_form, format_fill_report, try_upload_resume
@@ -476,15 +477,15 @@ def open_job(job_id, profile, headless, fill, dry_run):
     try:
         while True:
             if job_id is not None:
-                job = session.query(Job).filter(Job.id == job_id, Job.status == 'shortlisted').first()
+                job = session.query(Job).filter(Job.id == job_id).first()
                 if not job:
-                    click.echo(f"No shortlisted job with id={job_id} found.")
+                    click.echo(f"No job with id={job_id} found.")
                     return
             else:
                 job = (
                     session.query(Job)
                     .filter(
-                        Job.status == 'shortlisted',
+                        Job.status == queue_status,
                         Job.url.isnot(None),
                         Job.url != '',
                         Job.id.notin_(seen_ids),
@@ -493,7 +494,7 @@ def open_job(job_id, profile, headless, fill, dry_run):
                     .first()
                 )
                 if not job:
-                    click.echo("No more shortlisted jobs. All done!")
+                    click.echo(f"No more {queue_status} jobs. All done!")
                     return
 
             click.echo("")
