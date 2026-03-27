@@ -44,6 +44,12 @@ SYSTEM_BROWSER_DOMAINS = {
     "jobicy.com",
 }
 
+# Sources that require a paid subscription to apply.
+# Excluded from 'all' by default — use --source remoteok explicitly to include.
+SUBSCRIPTION_SOURCES = {
+    "remoteok",
+}
+
 engine = create_engine(config.DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -62,6 +68,9 @@ def _should_preserve_final_status(job: Job) -> bool:
 def _run_fetch(source: str, dry_run: bool):
     if source == "all":
         for s in CONNECTORS:
+            if s in SUBSCRIPTION_SOURCES:
+                logger.info(f"Skipping '{s}' (subscription required — use --source {s} to include).")
+                continue
             _run_fetch(s, dry_run)
         return
 
