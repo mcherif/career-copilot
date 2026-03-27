@@ -133,8 +133,16 @@ def _has_title_relevance(title: str, title_skill_matches: list, title_keyword_ma
         "firmware",
         "embedded",
         "systems",
+        "devops",
+        "infrastructure",
+        "data",
+        "microservices",
+        "distributed",
+        "api",
+        "gpu",
+        "llm",
     ]
-    role_tokens = ["engineer", "developer", "architect"]
+    role_tokens = ["engineer", "developer", "architect", "specialist", "lead"]
     return any(token in title_lower for token in domain_tokens) and any(token in title_lower for token in role_tokens)
 
 def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
@@ -175,7 +183,7 @@ def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
     if result["remote_eligibility"] == "accept":
         score += 20
     elif result["remote_eligibility"] == "review":
-        score += 5
+        score += 10
         
     # A. Skills overlap
     skills = profile.get("skills", [])
@@ -230,17 +238,17 @@ def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
             score -= 15 # Severe penalty if contract isn't wanted
 
     has_title_relevance = _has_title_relevance(title, title_skills, title_keywords, role_score)
-    if not has_title_relevance and score < 45:
+    if not has_title_relevance and score < 30:
         result["fit_score"] = score
         result["recommended_status"] = "rejected"
         return result
-            
+
     # Final thresholding
     result["fit_score"] = score
     if score >= 65:
         result["recommended_status"] = "shortlisted"
-    elif score >= 35:
-        result["recommended_status"] = "review" 
+    elif score >= 28:
+        result["recommended_status"] = "review"
     else:
         result["recommended_status"] = "rejected"
         

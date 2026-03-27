@@ -1,3 +1,4 @@
+import re
 import traceback
 import requests
 from typing import List, Dict, Any
@@ -6,6 +7,32 @@ from connectors.base import BaseConnector
 from utils.ats_detector import detect_ats
 from utils.text_cleaning import clean_description
 from utils.logger import setup_logger
+
+# ATS domains that, when found in a job description, reliably point to the
+# direct application form — use these as the job URL instead of remoteok.com.
+_ATS_DOMAINS = [
+    "greenhouse.io",
+    "lever.co",
+    "ashbyhq.com",
+    "workday.com",
+    "myworkdayjobs.com",
+    "smartrecruiters.com",
+    "recruitee.com",
+    "jobvite.com",
+    "icims.com",
+    "taleo.net",
+    "breezy.hr",
+    "bamboohr.com",
+    "apply.",
+]
+
+
+def _extract_ats_url(html: str) -> str | None:
+    """Return the first href in html that points to a known ATS platform."""
+    for href in re.findall(r'href=["\']([^"\']+)', html):
+        if any(domain in href for domain in _ATS_DOMAINS):
+            return href
+    return None
 
 logger = setup_logger("remoteok_connector")
 
@@ -36,7 +63,11 @@ class RemoteOKConnector(BaseConnector):
             return []
 
     def normalize(self, raw_job: Dict[str, Any]) -> Dict[str, Any]:
-        url = raw_job.get("url", "")
+        # Try to extract a direct ATS apply URL from the description HTML so
+        # the browser never has to touch remoteok.com (Google OAuth wall).
+        # Fall back to the remoteok listing URL if nothing is found.
+        description_html = raw_job.get("description", "")
+        url = _extract_ats_url(description_html) or raw_job.get("url", "")
 
         posted_date = None
         date_str = raw_job.get("date")

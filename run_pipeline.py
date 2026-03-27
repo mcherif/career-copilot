@@ -497,6 +497,43 @@ def open_job(job_id, profile, headless, fill, dry_run):
             target_url = job.url
             session_result = {"outcome": "done"}  # mutable sentinel shared with async closure
 
+            # RemoteOK requires Google OAuth — open in the system browser instead
+            # of Playwright so the user's existing session can handle sign-in.
+            if target_url and "remoteok.com" in target_url.lower():
+                import webbrowser
+                click.echo("RemoteOK listing — opening in your default browser (Google OAuth required).")
+                webbrowser.open(target_url)
+                click.echo("Press ENTER when you are done applying.")
+                try:
+                    input()
+                except Exception:
+                    pass
+                # Fall through to "Did you apply?" below.
+                seen_ids.add(job.id)
+                click.echo("")
+                if click.confirm("Did you apply?", default=False):
+                    job.status = "applied"
+                    existing = (
+                        session.query(ApplicationHistory)
+                        .filter_by(company=job.company, job_title=job.title)
+                        .first()
+                    )
+                    if not existing:
+                        history = ApplicationHistory(
+                            company=job.company,
+                            job_title=job.title,
+                            applied_date=datetime.date.today(),
+                            source=job.source or "manual",
+                        )
+                        session.add(history)
+                    session.commit()
+                    click.echo(f"Marked as applied: {job.title} @ {job.company}")
+                else:
+                    click.echo("No changes recorded.")
+                if job_id is not None:
+                    return
+                continue
+
             async def _browser_session():
                 async with async_playwright() as pw:
                     browser = await pw.chromium.launch(headless=headless)
