@@ -41,6 +41,7 @@ CONNECTORS = {
 SYSTEM_BROWSER_DOMAINS = {
     "remoteok.com",
     "weworkremotely.com",
+    "jobicy.com",
 }
 
 engine = create_engine(config.DATABASE_URL)
