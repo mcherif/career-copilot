@@ -36,6 +36,13 @@ CONNECTORS = {
     "jobicy": JobicyConnector,
 }
 
+# Job listing domains that block Playwright (bot detection / OAuth walls).
+# URLs from these domains are opened in the user's default system browser.
+SYSTEM_BROWSER_DOMAINS = {
+    "remoteok.com",
+    "weworkremotely.com",
+}
+
 engine = create_engine(config.DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -491,17 +498,20 @@ def open_job(job_id, profile, headless, fill, dry_run):
             click.echo("")
 
             if not click.confirm("Open this job?", default=True):
-                return
+                seen_ids.add(job.id)
+                continue
 
             job_dict = {c.name: getattr(job, c.name) for c in job.__table__.columns}
             target_url = job.url
             session_result = {"outcome": "done"}  # mutable sentinel shared with async closure
 
-            # RemoteOK requires Google OAuth — open in the system browser instead
-            # of Playwright so the user's existing session can handle sign-in.
-            if target_url and "remoteok.com" in target_url.lower():
+            # Some listing sites block Playwright (bot detection / OAuth walls).
+            # Open these in the user's default browser where their session is live.
+            _url_lower = (target_url or "").lower()
+            if any(domain in _url_lower for domain in SYSTEM_BROWSER_DOMAINS):
                 import webbrowser
-                click.echo("RemoteOK listing — opening in your default browser (Google OAuth required).")
+                source_label = job.source or "listing site"
+                click.echo(f"{source_label} — opening in your default browser (bot protection blocks automated browser).")
                 webbrowser.open(target_url)
                 click.echo("Press ENTER when you are done applying.")
                 try:
