@@ -48,10 +48,11 @@ SYSTEM_BROWSER_DOMAINS = {
     "jobicy.com",
 }
 
-# Sources that require a paid subscription to apply.
-# Excluded from 'all' by default — use --source remoteok explicitly to include.
-SUBSCRIPTION_SOURCES = {
-    "remoteok",
+# Sources disabled from 'all' by default (subscription required or bot-protected).
+# Enable individually with --source <name>.
+DISABLED_SOURCES = {
+    "remoteok",        # subscription required to apply
+    "weworkremotely",  # Cloudflare bot protection blocks automated browser
 }
 
 engine = create_engine(config.DATABASE_URL)
@@ -72,8 +73,8 @@ def _should_preserve_final_status(job: Job) -> bool:
 def _run_fetch(source: str, dry_run: bool):
     if source == "all":
         for s in CONNECTORS:
-            if s in SUBSCRIPTION_SOURCES:
-                logger.info(f"Skipping '{s}' (subscription required — use --source {s} to include).")
+            if s in DISABLED_SOURCES:
+                logger.info(f"Skipping '{s}' (disabled — use --source {s} to include).")
                 continue
             _run_fetch(s, dry_run)
         return
