@@ -111,7 +111,7 @@ class GetOnBoardConnector(BaseConnector):
                         pass
                 attrs = job.get("attributes", {})
                 remote_modality = attrs.get("remote_modality", "")
-                if remote_modality in ("hybrid", "no_remote"):
+                if remote_modality != "fully_remote":
                     continue
                 lang = attrs.get("lang", "")
                 if lang and lang != "lang_not_specified" and lang not in allowed_langs:
