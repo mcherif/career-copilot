@@ -51,6 +51,7 @@ SYSTEM_BROWSER_DOMAINS = {
     "remoteok.com",
     "weworkremotely.com",
     "jobicy.com",
+    "getonbrd.com",
 }
 
 # Sources disabled from 'all' by default (subscription required or bot-protected).
