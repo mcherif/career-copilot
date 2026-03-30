@@ -24,5 +24,6 @@ OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen2.5:7b"
 LLM_TIMEOUT = 60
 LLM_MAX_JOBS_PER_RUN = 100
+MAX_JOB_AGE_DAYS = 10  # Jobs older than this are skipped at fetch time
 LLM_STATUS_DEFAULT = "review"
 LLM_PROMOTION_CONFIDENCE = 75

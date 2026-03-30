@@ -20,6 +20,8 @@ from connectors.arbeitnow import ArbeitnowConnector
 from connectors.jobicy import JobicyConnector
 from connectors.jobspresso import JobspressoConnector
 from connectors.dynamitejobs import DynamiteJobsConnector
+from connectors.workingnomads import WorkingNomadsConnector
+from connectors.getonboard import GetOnBoardConnector
 from utils.dedup import is_duplicate
 from utils.application_filter import has_already_applied
 from utils.llm_analysis import analyze_job_with_ollama
@@ -39,6 +41,8 @@ CONNECTORS = {
     "jobicy": JobicyConnector,
     "jobspresso": JobspressoConnector,
     "dynamitejobs": DynamiteJobsConnector,
+    "workingnomads": WorkingNomadsConnector,
+    "getonboard": GetOnBoardConnector,
 }
 
 # Job listing domains that block Playwright (bot detection / OAuth walls).
@@ -113,7 +117,16 @@ def _run_fetch(source: str, dry_run: bool):
             try:
                 normalized = connector.normalize(raw_job)
                 logger.debug(f"Normalized job: '{normalized.get('title')}' at '{normalized.get('company')}'")
-                
+
+                posted_date = normalized.get("posted_date")
+                if posted_date:
+                    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=config.MAX_JOB_AGE_DAYS)
+                    if posted_date.tzinfo is None:
+                        posted_date = posted_date.replace(tzinfo=datetime.timezone.utc)
+                    if posted_date < cutoff:
+                        run.jobs_duplicates += 1
+                        continue
+
                 if is_duplicate(normalized, session):
                     run.jobs_duplicates += 1
                     continue
@@ -469,7 +482,7 @@ def triage():
         session.close()
 
 @cli.command()
-@click.option('--source', required=True, type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'jobspresso', 'dynamitejobs', 'all']), help='Job source to fetch from')
+@click.option('--source', required=True, type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'jobspresso', 'dynamitejobs', 'workingnomads', 'getonboard', 'all']), help='Job source to fetch from')
 @click.option('--dry-run', is_flag=True, help='Run pipeline without inserting jobs into database')
 def fetch(source: str, dry_run: bool):
     """Fetch remote jobs from the specified source."""
@@ -504,7 +517,7 @@ def analyze(profile: str, model: str, target_status: str, limit: int, dry_run: b
     _run_analyze(profile, model, target_status, limit, dry_run)
 
 @cli.command(name='full-run')
-@click.option('--source', default='all', type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'jobspresso', 'dynamitejobs', 'all']), show_default=True, help='Job source to fetch from')
+@click.option('--source', default='all', type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'jobspresso', 'dynamitejobs', 'workingnomads', 'getonboard', 'all']), show_default=True, help='Job source to fetch from')
 @click.option('--profile', default='profile.yaml', help='Path to candidate profile YAML')
 @click.option('--model', default=config.OLLAMA_MODEL, help='Ollama model name')
 @click.option('--analyze-status', default=config.LLM_STATUS_DEFAULT, type=click.Choice(['review', 'shortlisted', 'rejected']), show_default=True, help='Job status bucket to analyze after evaluation')
