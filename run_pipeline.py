@@ -437,6 +437,11 @@ def full_run(source: str, profile: str, model: str, analyze_status: str, analyze
     _run_analyze(profile, model, analyze_status, analyze_limit, dry_run)
     logger.info("Full pipeline run complete.")
 
+    if not dry_run:
+        click.echo("")
+        for status in ("shortlisted", "review"):
+            _display_jobs_by_status(status, limit=20)
+
 @cli.command()
 @click.option('--limit', default=20, type=int, show_default=True, help='Maximum number of shortlisted jobs to display')
 def shortlist(limit: int):

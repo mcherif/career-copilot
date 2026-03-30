@@ -171,7 +171,13 @@ def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
     if result["remote_eligibility"] == "reject":
         result["recommended_status"] = "rejected"
         return result
-        
+
+    blacklist = [str(c).strip().lower() for c in profile.get("blacklisted_companies", []) if str(c).strip()]
+    company = str(job.get("company", "")).strip().lower()
+    if blacklist and any(b == company or b in company for b in blacklist):
+        result["recommended_status"] = "rejected"
+        return result
+
     if "junior" in combined_text or "intern" in title:
         score -= 30
         
