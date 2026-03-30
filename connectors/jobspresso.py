@@ -2,6 +2,7 @@ import traceback
 import requests
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Any
+from urllib.parse import urlparse, parse_qs
 from dateutil import parser
 from connectors.base import BaseConnector
 from utils.ats_detector import detect_ats
@@ -69,8 +70,13 @@ class JobspressoConnector(BaseConnector):
         if " at " in title:
             title, _, company = title.rpartition(" at ")
 
+        # Extract the WordPress post ID from ?p=XXXXX, fall back to slug or title.
+        parsed = urlparse(url)
+        post_id = parse_qs(parsed.query).get("p", [None])[0]
+        external_id = post_id or parsed.path.rstrip("/").split("/")[-1] or title[:80]
+
         return {
-            "id": url.split("?")[0].rstrip("/").split("/")[-1] or title[:80],
+            "id": external_id,
             "title": title.strip(),
             "company": company.strip(),
             "url": url,
