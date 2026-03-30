@@ -84,6 +84,9 @@ class GetOnBoardConnector(BaseConnector):
                             continue
                     except Exception:
                         pass
+                remote_modality = job.get("attributes", {}).get("remote_modality", "")
+                if remote_modality in ("hybrid", "no_remote"):
+                    continue
                 job_id = job.get("id")
                 if job_id and job_id not in seen_ids:
                     seen_ids.add(job_id)

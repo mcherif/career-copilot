@@ -104,6 +104,10 @@ def classify_remote_eligibility(job: Dict[str, Any], profile: Dict[str, Any] | N
     if raw_location in US_ONLY_LOCATIONS:
         return "reject"
 
+    remote_only = (profile or {}).get("preferences", {}).get("remote_only", False)
+    if remote_only and "hybrid" in raw_location:
+        return "reject"
+
     if _phrase_in_text(DEFAULT_REJECT_KEYWORDS, combined_text):
         return "reject"
 

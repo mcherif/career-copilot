@@ -1,123 +1,147 @@
 # Career Copilot
 
-Career Copilot is an intelligent job discovery and application assistant designed for remote technical roles.
+An intelligent job discovery and application assistant for remote technical roles.
 
-It automatically discovers job opportunities, evaluates them against your profile, and assists with application form filling while always keeping a **human in control of final submissions**.
-
-The goal is to reduce the time spent searching and applying to jobs while maintaining safety, transparency, and full oversight.
-
-## Why this project exists
-
-Job searching often requires repeating the same manual steps across dozens of platforms.
-Career Copilot focuses on automating the mechanical parts of the process while keeping humans responsible for the final decision.
-
-The goal is **assistive automation, not blind automation**.
-
----
-
-## Core Features
-
-Career Copilot helps automate the most repetitive parts of the job search process.
-
-**Implemented:**
-
-- Discover remote jobs from multiple sources
-- Normalize and deduplicate job listings
-- Evaluate jobs against your skills and preferences
-- Generate explanations for why a job fits your profile
-
-**Planned:**
-
-- Prefill application forms on supported job platforms
-- Require **explicit human approval** before submission
+It fetches jobs from multiple sources, scores them against your profile, runs a local LLM analysis to surface the best matches, and assists with application form filling — while keeping **you in control of every submission**.
 
 ---
 
 ## Design Principles
 
-**Privacy First** - All LLM processing happens locally using open-weight models through Ollama.
+**Privacy First** — All LLM processing runs locally via [Ollama](https://ollama.com). No data sent to external AI services.
 
-**Human in the Loop** - No application is submitted automatically. Every submission requires explicit approval.
+**Human in the Loop** — No application is submitted automatically. Every submission requires your explicit approval.
 
-**Safety by Default** - Development mode runs with `DRY_RUN=true` to prevent accidental submissions.
-
-**Modular Architecture** - Each component (job discovery, evaluation, automation) works independently.
+**Assistive, not blind** — The pipeline reduces mechanical work (searching, filtering, form filling) while you make the final calls.
 
 ---
 
-## System Pipeline
+## Job Sources
 
-Job Sources -> Ingestion Pipeline -> Normalization -> Database -> Career Intelligence -> LLM Analysis -> Prefill Automation -> Human Approval -> Submission
+| Source | Type | Notes |
+|---|---|---|
+| Remotive | JSON API | General remote tech jobs |
+| Arbeitnow | JSON API | European-focused remote jobs |
+| Jobicy | JSON API | Remote tech jobs |
+| Jobspresso | RSS | Curated remote jobs |
+| Dynamite Jobs | RSS | Remote-first jobs |
+| Working Nomads | JSON API | Remote jobs for nomads |
+| GetOnBoard | JSON API | Tech jobs, LatAm-focused |
+| RemoteOK | JSON API | Disabled by default (subscription) |
+| WeWorkRemotely | RSS | Disabled by default (bot protection) |
 
-Current implemented CLI orchestration:
+Jobs older than 10 days are filtered out at fetch time across all sources.
 
-```text
-python run_pipeline.py full-run
-        |
-        v
-[FETCH]
-  -> pull jobs from source
-  -> normalize
-  -> dedupe
-  -> insert new jobs
+---
 
-        |
-        v
-[EVALUATE]
-  -> compute remote eligibility
-  -> compute rule-based fit_score
-  -> assign rule_status
-  -> initialize or preserve final status
-  -> select recommended resume
+## Pipeline
 
-        |
-        v
-[ANALYZE]
-  -> send selected jobs to Ollama
-  -> structured JSON reasoning
-  -> conservative promotion/demotion
-  -> persist LLM fields
+```
+full-run
+  │
+  ├─ FETCH        Pull from all sources → normalize → deduplicate → store
+  │
+  ├─ EVALUATE     Rule-based scoring against your profile
+  │                 remote eligibility · skill overlap · seniority · title relevance
+  │                 → status: shortlisted / review / rejected
+  │
+  └─ ANALYZE      Local LLM (Ollama) pass on review jobs
+                    → promotes to shortlisted or rejects with explanation
 ```
 
-Result: `jobs` table
+Job state model:
 
-```text
-job metadata
-rule_status + rule-based scoring
-recommended resume
-LLM reasoning + confidence
-final job status
-```
+- **Rule layer** — `fit_score`, `rule_status`, `remote_eligibility`, `matched_skills`
+- **LLM layer** — `llm_fit_score`, `recommendation`, `llm_confidence`, `fit_explanation`
+- **Decision layer** — `status` (new → review → shortlisted / rejected / applied)
 
-State model:
+---
 
-- Deterministic layer: `rule_status`, `fit_score`
-- Semantic layer: `llm_fit_score`, `recommendation`, `llm_confidence`, `llm_status`
-- Final decision layer: `status`
+## Command Reference
 
-Example production command:
+Run `python run_pipeline.py help` for the full reference. Key commands:
+
+| Command | What it does |
+|---|---|
+| `full-run` | Fetch + evaluate + LLM analyze in one shot |
+| `full-run --email` | Same, plus email digest if new jobs found |
+| `triage` | Work through review jobs: shortlist / reject / open / skip |
+| `open-job` | Open a shortlisted job in browser with form prefill |
+| `stats` | Job counts by status |
+| `shortlist` | List shortlisted jobs |
+| `review` | List review jobs |
+| `rescore` | Re-apply scoring rules to existing review jobs |
+| `setup-credentials` | Store email credentials in Windows Credential Manager |
+
+---
+
+## Setup
+
+### 1. Install dependencies
 
 ```powershell
-python run_pipeline.py full-run `
-  --source remotive `
-  --profile profile.yaml `
-  --model qwen2.5:7b `
-  --analyze-status review `
-  --analyze-limit 10
+pip install -r requirements.txt
 ```
 
-Human-facing review commands:
+### 2. Configure your profile
+
+Edit `profile.yaml` with your skills, target roles, seniority, location preferences, and blacklisted companies.
+
+### 3. Set up Ollama
+
+Install [Ollama](https://ollama.com) and pull a model:
 
 ```powershell
-python run_pipeline.py shortlist
-python run_pipeline.py review
-python run_pipeline.py rejected
+ollama pull qwen2.5:7b
 ```
 
-Full technical documentation:
+### 4. (Optional) Configure email reports
 
-- `docs/ARCHITECTURE.md`
+```powershell
+python run_pipeline.py setup-credentials
+```
 
-Planned enhancements and future work:
+Credentials are stored in Windows Credential Manager — never written to disk.
 
-- `docs/improvements.md`
+Copy `.env.example` to `.env` and set `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` if needed (defaults to Gmail).
+
+### 5. (Optional) Schedule automated runs
+
+`schedule_run.bat` is pre-configured to run `full-run --email`. Register it with Windows Task Scheduler:
+
+The default schedule runs at 8am, 12pm, 4pm, and 8pm daily.
+
+---
+
+## Profile
+
+`profile.yaml` drives all filtering and scoring:
+
+```yaml
+skills:          # matched against job titles and descriptions
+keywords:        # domain-specific terms (gpu, llm, inference, etc.)
+target_roles:    # role titles you're targeting
+seniority:       # preferred and acceptable levels
+blacklisted_companies:
+preferences:
+  remote_only: true
+  accepted_regions: [worldwide, emea, europe, canada, ...]
+  reject_regions: [us only, israel only]
+  contractor_ok: true
+resumes:         # multiple resumes with tags — best match selected per job
+```
+
+---
+
+## Application Assistance
+
+`open-job` opens a job in a Playwright browser window and:
+
+1. Navigates to the application form
+2. Detects the ATS (Greenhouse, Lever, Ashby, etc.)
+3. Prefills fields from your profile (name, email, phone, LinkedIn, GitHub)
+4. Attempts to upload the best-matched resume
+5. Waits for your review — **you submit manually**
+6. Prompts you to mark the job as `applied`
+
+Bot-protected sites (remoteok.com, weworkremotely.com, jobicy.com) open in your system browser without prefill.

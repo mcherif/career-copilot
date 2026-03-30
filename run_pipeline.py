@@ -58,6 +58,7 @@ SYSTEM_BROWSER_DOMAINS = {
 DISABLED_SOURCES = {
     "remoteok",        # subscription required to apply
     "weworkremotely",  # Cloudflare bot protection blocks automated browser
+    "workingnomads",   # jobs go via Proxify — requires profile approval before applying
 }
 
 engine = create_engine(config.DATABASE_URL)
@@ -594,7 +595,7 @@ def full_run(source: str, profile: str, model: str, analyze_status: str, analyze
 
 @cli.command()
 @click.option('--profile', default='profile.yaml', show_default=True, help='Path to candidate profile YAML')
-@click.option('--status', default='review', type=click.Choice(['review', 'new']), show_default=True, help='Job status bucket to rescore')
+@click.option('--status', default='review', type=click.Choice(['review', 'new', 'shortlisted']), show_default=True, help='Job status bucket to rescore')
 def rescore(profile: str, status: str):
     """Re-run rule-based scoring on existing jobs and reject those that no longer qualify."""
     candidate_profile = _load_profile(profile)
@@ -646,6 +647,58 @@ def setup_credentials():
     click.echo("")
     click.echo(click.style("Credentials saved to Windows Credential Manager.", fg="green"))
     click.echo("You can now remove EMAIL_FROM, EMAIL_TO, and EMAIL_PASSWORD from your .env file.")
+
+@cli.command(name='help')
+def help_command():
+    """Show a summary of all available commands."""
+    lines = [
+        ("", "DAILY WORKFLOW", ""),
+        ("full-run", "Fetch, evaluate and LLM-analyze new jobs", "--email  --source <src>  --dry-run"),
+        ("triage", "Work through review jobs one by one (shortlist / reject / open)", ""),
+        ("stats", "Show job counts by status + command tips", ""),
+        ("", "", ""),
+        ("", "BROWSING JOBS", ""),
+        ("shortlist", "List shortlisted jobs", "--limit N"),
+        ("review", "List review jobs", "--limit N"),
+        ("rejected", "List rejected jobs", "--limit N"),
+        ("deferred", "List deferred jobs", "--limit N"),
+        ("open-job", "Open a job in browser and apply", "--status shortlisted|review  --job-id N"),
+        ("", "", ""),
+        ("", "PIPELINE TOOLS", ""),
+        ("fetch", "Fetch only (no scoring/LLM). Use --source all for all sources", "--source <src>  --dry-run"),
+        ("evaluate", "Score new jobs against your profile", "--profile  --dry-run"),
+        ("analyze", "Run LLM analysis on review jobs", "--limit N  --model <model>  --dry-run"),
+        ("rescore", "Re-apply scoring rules to existing review jobs", "--status review|new"),
+        ("", "", ""),
+        ("", "SETUP & EMAIL", ""),
+        ("setup-credentials", "Store email credentials in Windows Credential Manager", ""),
+        ("send-test-email", "Send a test email to verify SMTP setup", ""),
+        ("", "", ""),
+        ("", "SOURCES", ""),
+        ("", "remotive  arbeitnow  jobicy  jobspresso  dynamitejobs", ""),
+        ("", "workingnomads  getonboard  (all = all enabled sources)", ""),
+        ("", "remoteok  weworkremotely  (disabled by default)", ""),
+    ]
+
+    HIGHLIGHT = {"full-run", "open-job"}
+
+    click.echo("")
+    click.echo(click.style("  Career Copilot — Command Reference", fg="cyan", bold=True))
+    click.echo("")
+    for cmd, desc, opts in lines:
+        if not cmd and not desc and not opts:
+            click.echo("")
+        elif not cmd:
+            click.echo(click.style(f"  {desc}", fg="yellow", bold=True))
+        elif cmd in HIGHLIGHT:
+            cmd_str = click.style(f"  {cmd:<22}", fg="magenta", bold=True)
+            opts_str = click.style(f"  {opts}", fg="white") if opts else ""
+            click.echo(f"{cmd_str}{desc}{opts_str}")
+        else:
+            cmd_str = click.style(f"  {cmd:<22}", fg="green")
+            opts_str = click.style(f"  {opts}", fg="white") if opts else ""
+            click.echo(f"{cmd_str}{desc}{opts_str}")
+    click.echo("")
 
 @cli.command()
 def stats():
