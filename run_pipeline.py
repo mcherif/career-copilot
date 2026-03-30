@@ -26,6 +26,7 @@ from utils.llm_analysis import analyze_job_with_ollama
 from utils.scoring import score_job
 from utils.resume_selector import select_resume
 from utils.logger import setup_logger
+from utils.email_report import send_report
 import config
 
 logger = setup_logger("run_pipeline")
@@ -509,8 +510,12 @@ def analyze(profile: str, model: str, target_status: str, limit: int, dry_run: b
 @click.option('--analyze-status', default=config.LLM_STATUS_DEFAULT, type=click.Choice(['review', 'shortlisted', 'rejected']), show_default=True, help='Job status bucket to analyze after evaluation')
 @click.option('--analyze-limit', default=config.LLM_MAX_JOBS_PER_RUN, type=int, show_default=True, help='Maximum number of jobs to analyze')
 @click.option('--dry-run', is_flag=True, help='Run the full pipeline without saving DB changes')
-def full_run(source: str, profile: str, model: str, analyze_status: str, analyze_limit: int, dry_run: bool):
+@click.option('--email', is_flag=True, help='Send email report if new shortlisted or review jobs were found')
+def full_run(source: str, profile: str, model: str, analyze_status: str, analyze_limit: int, dry_run: bool, email: bool):
     """Run fetch, evaluate, and analyze in one command."""
+    from dotenv import load_dotenv
+    load_dotenv()
+
     try:
         _load_profile(profile)
     except Exception as e:
@@ -522,6 +527,15 @@ def full_run(source: str, profile: str, model: str, analyze_status: str, analyze
         f"model='{model}', analyze_status='{analyze_status}', analyze_limit={max(1, analyze_limit)}, "
         f"dry_run={dry_run}"
     )
+
+    # Snapshot counts before run to detect new additions
+    session = SessionLocal()
+    try:
+        from sqlalchemy import func
+        before = dict(session.query(Job.status, func.count()).group_by(Job.status).all())
+    finally:
+        session.close()
+
     _run_fetch(source, dry_run)
     _run_evaluate(profile, dry_run, all_jobs=False)
     _run_analyze(profile, model, analyze_status, analyze_limit, dry_run)
@@ -531,6 +545,39 @@ def full_run(source: str, profile: str, model: str, analyze_status: str, analyze
         click.echo("")
         for status in ("shortlisted", "review"):
             _display_jobs_by_status(status, limit=20)
+
+    if email and not dry_run:
+        session = SessionLocal()
+        try:
+            from sqlalchemy import func
+            after = dict(session.query(Job.status, func.count()).group_by(Job.status).all())
+            new_shortlisted = after.get("shortlisted", 0) - before.get("shortlisted", 0)
+            new_review = after.get("review", 0) - before.get("review", 0)
+
+            if new_shortlisted > 0 or new_review > 0:
+                # Collect the newly promoted/added jobs for the email
+                new_jobs = []
+                if new_shortlisted > 0:
+                    jobs = (session.query(Job)
+                            .filter(Job.status == "shortlisted")
+                            .order_by(Job.id.desc())
+                            .limit(new_shortlisted).all())
+                    new_jobs += [{"title": j.title, "company": j.company,
+                                  "fit_score": j.fit_score, "status": "shortlisted",
+                                  "source": j.source} for j in jobs]
+                if new_review > 0:
+                    jobs = (session.query(Job)
+                            .filter(Job.status == "review", Job.llm_status == None)
+                            .order_by(Job.id.desc())
+                            .limit(new_review).all())
+                    new_jobs += [{"title": j.title, "company": j.company,
+                                  "fit_score": j.fit_score, "status": "review",
+                                  "source": j.source} for j in jobs]
+                send_report(new_jobs, after)
+            else:
+                logger.info("No new shortlisted or review jobs — skipping email report.")
+        finally:
+            session.close()
 
 @cli.command()
 @click.option('--profile', default='profile.yaml', show_default=True, help='Path to candidate profile YAML')
@@ -553,6 +600,39 @@ def rescore(profile: str, status: str):
         click.echo(f"Rescored {len(jobs)} '{status}' jobs: {rejected} newly rejected, {len(jobs) - rejected} kept.")
     finally:
         session.close()
+
+@cli.command(name='send-test-email')
+def send_test_email():
+    """Send a test email to verify credentials and SMTP settings."""
+    from dotenv import load_dotenv
+    load_dotenv()
+    dummy_jobs = [
+        {"title": "Test: Senior ML Engineer", "company": "Acme Corp", "fit_score": 75, "status": "shortlisted", "source": "remotive"},
+        {"title": "Test: Backend Engineer", "company": "Startup Inc", "fit_score": 52, "status": "review", "source": "arbeitnow"},
+    ]
+    dummy_counts = {"shortlisted": 3, "review": 12, "applied": 1, "deferred": 0, "rejected": 84}
+    ok = send_report(dummy_jobs, dummy_counts)
+    if ok:
+        click.echo(click.style("Test email sent successfully.", fg="green"))
+    else:
+        click.echo(click.style("Failed to send test email — check logs above.", fg="red"))
+
+@cli.command(name='setup-credentials')
+def setup_credentials():
+    """Store email credentials securely in Windows Credential Manager."""
+    import keyring
+    service = "career-copilot"
+    click.echo("Storing email credentials in Windows Credential Manager (never written to disk).")
+    click.echo("")
+    email_from = click.prompt("Sender email address")
+    email_to = click.prompt("Recipient email address", default=email_from)
+    password = click.prompt("Gmail App Password", hide_input=True)
+    keyring.set_password(service, "EMAIL_FROM", email_from)
+    keyring.set_password(service, "EMAIL_TO", email_to)
+    keyring.set_password(service, "EMAIL_PASSWORD", password)
+    click.echo("")
+    click.echo(click.style("Credentials saved to Windows Credential Manager.", fg="green"))
+    click.echo("You can now remove EMAIL_FROM, EMAIL_TO, and EMAIL_PASSWORD from your .env file.")
 
 @cli.command()
 def stats():

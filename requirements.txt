@@ -7,3 +7,4 @@ colorlog
 python-dotenv
 pyyaml
 playwright
+keyring

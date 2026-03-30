@@ -2,6 +2,9 @@ career_copilot_plan.json
 career_copilot_project_plan.pdf
 day1_implementation_spec.md
 
+# Secrets
+.env
+
 # Python
 __pycache__/
 *.pyc
