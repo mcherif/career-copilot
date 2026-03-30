@@ -2,6 +2,26 @@ import re
 from typing import Dict, Any
 from utils.remote_filter import classify_remote_eligibility
 
+TITLE_REJECT_KEYWORDS = [
+    # Sales / BD
+    "sales manager", "sales director", "sales executive", "sales representative",
+    "regional sales", "account executive", "account manager",
+    # Marketing / Social
+    "social media", "marketing manager", "marketing specialist", "brand manager", "brand director",
+    # Customer-facing non-tech
+    "customer service", "customer support",
+    # Writing / content
+    "copywriter", "content writer", "freelance writer",
+    # Recruiting
+    "recruiter", "talent acquisition",
+    # Non-tech consulting
+    "career advancement", "career consultant", "career coach",
+    "energy solutions", "energy advisor",
+    "implementation consultant",
+    # ERP / non-engineering
+    "sap consultant", "sap berater", "s/4hana",
+]
+
 KEYWORD_ALIASES = {
     "computer vision": ["cv"],
     "cv": ["computer vision"],
@@ -178,6 +198,10 @@ def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
         result["recommended_status"] = "rejected"
         return result
 
+    if any(kw in title for kw in TITLE_REJECT_KEYWORDS):
+        result["recommended_status"] = "rejected"
+        return result
+
     if "junior" in combined_text or "intern" in title:
         score -= 30
         
@@ -244,7 +268,7 @@ def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
             score -= 15 # Severe penalty if contract isn't wanted
 
     has_title_relevance = _has_title_relevance(title, title_skills, title_keywords, role_score)
-    if not has_title_relevance and score < 30:
+    if not has_title_relevance and score < 40:
         result["fit_score"] = score
         result["recommended_status"] = "rejected"
         return result

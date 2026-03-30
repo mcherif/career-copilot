@@ -253,7 +253,7 @@ def _run_analyze(profile: str, model: str, target_status: str, limit: int, dry_r
     try:
         jobs_to_analyze = (
             session.query(Job)
-            .filter(Job.status == target_status)
+            .filter(Job.status == target_status, Job.llm_status == None)
             .order_by(Job.fit_score.desc(), Job.id.asc())
             .limit(limit)
             .all()
@@ -377,6 +377,96 @@ def _display_jobs_by_status(target_status: str, limit: int):
     finally:
         session.close()
 
+@cli.command(name='triage')
+def triage():
+    """Work through review jobs one by one: shortlist, reject, skip, or open in browser."""
+    import webbrowser
+
+    session = SessionLocal()
+    seen_ids: set = set()
+    try:
+        while True:
+            cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=10)
+            job = (
+                session.query(Job)
+                .filter(
+                    Job.status == 'review',
+                    Job.id.notin_(seen_ids),
+                    (Job.posted_date >= cutoff) | (Job.posted_date == None),
+                )
+                .order_by(Job.fit_score.desc(), Job.id.asc())
+                .first()
+            )
+            if not job:
+                click.echo("No more review jobs.")
+                break
+
+            click.echo("")
+            click.echo(f"[id={job.id}] {job.title} -- {job.company}")
+            click.echo(f"Score: {job.fit_score if job.fit_score is not None else '-'}  |  Source: {job.source or '-'}")
+            if job.recommendation:
+                click.echo(f"LLM:   {job.recommendation} (confidence {job.llm_confidence or '-'})")
+            if job.fit_explanation:
+                click.echo(f"Note:  {job.fit_explanation[:120]}")
+            click.echo(f"URL:   {job.url or '-'}")
+            click.echo("")
+            click.echo("  [s] shortlist   [r] reject   [o] open in browser   [n] next   [q] quit")
+
+            while True:
+                choice = click.prompt("Action", default="o").strip().lower()
+                if choice in ("s", "r", "o", "n", "q"):
+                    break
+                click.echo("  Please enter s, r, o, n, or q.")
+
+            quit_flag = False
+            if choice == "q":
+                break
+            elif choice == "s":
+                job.status = "shortlisted"
+                session.commit()
+                click.echo(f"  → Shortlisted: {job.title}")
+            elif choice == "r":
+                job.status = "rejected"
+                session.commit()
+                click.echo(f"  → Rejected: {job.title}")
+            elif choice == "o":
+                if job.url:
+                    webbrowser.open(job.url)
+                    click.echo("  Opened in browser. Press ENTER to continue.")
+                    try:
+                        input()
+                    except Exception:
+                        pass
+                    # Ask again after viewing
+                    click.echo("  [s] shortlist   [r] reject   [a] applied   [n] next   [q] quit")
+                    while True:
+                        choice2 = click.prompt("Action", default="n").strip().lower()
+                        if choice2 in ("s", "r", "a", "n", "q"):
+                            break
+                    if choice2 == "s":
+                        job.status = "shortlisted"
+                        session.commit()
+                        click.echo(f"  → Shortlisted: {job.title}")
+                    elif choice2 == "r":
+                        job.status = "rejected"
+                        session.commit()
+                        click.echo(f"  → Rejected: {job.title}")
+                    elif choice2 == "a":
+                        job.status = "applied"
+                        session.commit()
+                        click.echo(f"  → Applied: {job.title}")
+                    elif choice2 == "q":
+                        quit_flag = True
+                else:
+                    click.echo("  No URL available.")
+
+            seen_ids.add(job.id)
+            session.expire_all()
+            if quit_flag:
+                break
+    finally:
+        session.close()
+
 @cli.command()
 @click.option('--source', required=True, type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'jobspresso', 'dynamitejobs', 'all']), help='Job source to fetch from')
 @click.option('--dry-run', is_flag=True, help='Run pipeline without inserting jobs into database')
@@ -441,6 +531,53 @@ def full_run(source: str, profile: str, model: str, analyze_status: str, analyze
         click.echo("")
         for status in ("shortlisted", "review"):
             _display_jobs_by_status(status, limit=20)
+
+@cli.command()
+@click.option('--profile', default='profile.yaml', show_default=True, help='Path to candidate profile YAML')
+@click.option('--status', default='review', type=click.Choice(['review', 'new']), show_default=True, help='Job status bucket to rescore')
+def rescore(profile: str, status: str):
+    """Re-run rule-based scoring on existing jobs and reject those that no longer qualify."""
+    candidate_profile = _load_profile(profile)
+    session = SessionLocal()
+    try:
+        jobs = session.query(Job).filter(Job.status == status).all()
+        rejected = 0
+        for job in jobs:
+            job_dict = {c.name: getattr(job, c.name) for c in job.__table__.columns}
+            result = score_job(job_dict, candidate_profile)
+            if result["recommended_status"] == "rejected":
+                job.status = "rejected"
+                job.fit_score = result["fit_score"]
+                rejected += 1
+        session.commit()
+        click.echo(f"Rescored {len(jobs)} '{status}' jobs: {rejected} newly rejected, {len(jobs) - rejected} kept.")
+    finally:
+        session.close()
+
+@cli.command()
+def stats():
+    """Show a quick count of jobs by status."""
+    session = SessionLocal()
+    try:
+        from sqlalchemy import func
+        counts = dict(session.query(Job.status, func.count()).group_by(Job.status).all())
+        order = ["shortlisted", "review", "deferred", "applied", "rejected", "new"]
+        click.echo("")
+        for status in order:
+            n = counts.get(status, 0)
+            if status in ("shortlisted", "review") and n > 0:
+                click.echo(click.style(f"  {status:<12} {n}", fg="yellow", bold=True))
+            else:
+                click.echo(f"  {status:<12} {n}")
+        extras = set(counts) - set(order)
+        for status in sorted(extras):
+            click.echo(f"  {status:<12} {counts[status]}")
+        click.echo("")
+        if counts.get("review", 0) > 0:
+            click.echo(click.style("  Tip: run 'triage' to work through review jobs one by one.", fg="cyan"))
+        click.echo(click.style("  Tip: run 'full-run' to fetch and evaluate new jobs.", fg="cyan"))
+    finally:
+        session.close()
 
 @cli.command()
 @click.option('--limit', default=20, type=int, show_default=True, help='Maximum number of shortlisted jobs to display')
