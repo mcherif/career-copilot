@@ -14,6 +14,8 @@ DEFAULT_REJECT_KEYWORDS = [
     "remote us only",
     "must reside in the us",
     "must be based in the us",
+    "must be located in the us",
+    "must live in the us",
     "us citizenship required",
     "security clearance required",
     "remote within us",
@@ -21,6 +23,14 @@ DEFAULT_REJECT_KEYWORDS = [
     "us timezones",
     "us hours only",
     "north america only",
+    "usa only",
+    "usa-only",
+    "us only",
+    "us-only",
+    "united states only",
+    "us residents only",
+    "based in the united states",
+    "located in the united states",
 ]
 
 REVIEW_KEYWORDS = [
