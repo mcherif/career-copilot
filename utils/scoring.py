@@ -202,6 +202,16 @@ def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
         result["recommended_status"] = "rejected"
         return result
 
+    _SPANISH_MARKERS = [
+        "experiencia", "conocimiento", "ingenier", "buscamos", "dise\u00f1",
+        "construir", "colaborar", "licenciatura", "dominio", "habilidades",
+        "responsabilidades", "requisitos", "ofrecemos",
+    ]
+    desc_lower = str(job.get("description_text") or job.get("description") or "").lower()
+    if sum(1 for m in _SPANISH_MARKERS if m in desc_lower) >= 3:
+        result["recommended_status"] = "rejected"
+        return result
+
     if "junior" in combined_text or "intern" in title:
         score -= 30
         
