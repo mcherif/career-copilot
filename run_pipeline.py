@@ -136,7 +136,11 @@ def _run_fetch(source: str, dry_run: bool):
         if not dry_run:
             session.commit()
             
-        logger.info(f"Pipeline completed: {run.jobs_fetched} fetched, {run.jobs_new} new, {run.jobs_duplicates} duplicates from {source}.")
+        msg = f"Pipeline completed: {run.jobs_fetched} fetched, {run.jobs_new} new, {run.jobs_duplicates} duplicates from {source}."
+        if run.jobs_new:
+            logger.warning(msg)
+        else:
+            logger.info(msg)
         
     except Exception as e:
         session.rollback()
