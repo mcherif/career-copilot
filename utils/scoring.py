@@ -202,15 +202,22 @@ def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
         result["recommended_status"] = "rejected"
         return result
 
-    _SPANISH_MARKERS = [
-        "experiencia", "conocimiento", "ingenier", "buscamos", "dise\u00f1",
-        "construir", "colaborar", "licenciatura", "dominio", "habilidades",
-        "responsabilidades", "requisitos", "ofrecemos",
-    ]
+    # Reject jobs written in a language the candidate doesn't speak.
+    # Markers per language that rarely appear in English/French/Arabic text.
+    _LANG_MARKERS = {
+        "spanish": ["experiencia", "conocimiento", "ingenier", "buscamos", "dise\u00f1",
+                    "construir", "colaborar", "licenciatura", "responsabilidades", "requisitos"],
+        "portuguese": ["experi\u00eancia", "conhecimento", "engenharia", "desenvolvedor",
+                       "habilidades", "requisitos", "respons\u00e1vel", "constru\u00e7\u00e3o"],
+        "german": ["kenntnisse", "erfahrung", "anforderungen", "berufserfahrung",
+                   "kenntnisse", "wir suchen", "stellenbeschreibung", "aufgaben"],
+    }
+    profile_langs = {str(l).lower() for l in (profile or {}).get("languages", ["english"])}
     desc_lower = str(job.get("description_text") or job.get("description") or "").lower()
-    if sum(1 for m in _SPANISH_MARKERS if m in desc_lower) >= 3:
-        result["recommended_status"] = "rejected"
-        return result
+    for lang, markers in _LANG_MARKERS.items():
+        if lang not in profile_langs and sum(1 for m in markers if m in desc_lower) >= 3:
+            result["recommended_status"] = "rejected"
+            return result
 
     if "junior" in combined_text or "intern" in title:
         score -= 30

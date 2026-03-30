@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any
 
 import requests
+import yaml
 
 from connectors.base import BaseConnector
 from utils.ats_detector import detect_ats
@@ -10,6 +11,28 @@ from utils.text_cleaning import clean_description
 from utils.logger import setup_logger
 
 logger = setup_logger("getonboard_connector")
+
+# Maps profile language names → GetOnBoard API lang codes
+_LANG_CODE_MAP = {
+    "english": "en",
+    "spanish": "es",
+    "french": "fr",
+    "arabic": "ar",
+    "portuguese": "pt",
+    "german": "de",
+    "italian": "it",
+}
+
+
+def _load_allowed_lang_codes() -> set:
+    try:
+        with open("profile.yaml", encoding="utf-8") as f:
+            profile = yaml.safe_load(f)
+        langs = [str(l).lower() for l in (profile or {}).get("languages", [])]
+        codes = {_LANG_CODE_MAP[l] for l in langs if l in _LANG_CODE_MAP}
+        return codes or {"en"}  # default to English-only if not configured
+    except Exception:
+        return {"en"}
 
 # Tech-relevant categories only — excludes sales, marketing, HR, customer support, etc.
 CATEGORIES = [
@@ -35,10 +58,12 @@ class GetOnBoardConnector(BaseConnector):
         logger.info(f"Fetching jobs from {self.source_name} API...")
         all_jobs: List[Dict[str, Any]] = []
         seen_ids: set = set()
+        allowed_langs = _load_allowed_lang_codes()
+        logger.info(f"Allowed language codes: {allowed_langs}")
 
         for category in CATEGORIES:
             try:
-                category_jobs = self._fetch_category(category, seen_ids)
+                category_jobs = self._fetch_category(category, seen_ids, allowed_langs)
                 all_jobs.extend(category_jobs)
             except Exception as e:
                 logger.error(f"Error fetching category '{category}' from {self.source_name}: {e}")
@@ -50,7 +75,7 @@ class GetOnBoardConnector(BaseConnector):
         return all_jobs
 
     def _fetch_category(
-        self, category: str, seen_ids: set
+        self, category: str, seen_ids: set, allowed_langs: set
     ) -> List[Dict[str, Any]]:
         jobs: List[Dict[str, Any]] = []
         page = 1
@@ -88,7 +113,8 @@ class GetOnBoardConnector(BaseConnector):
                 remote_modality = attrs.get("remote_modality", "")
                 if remote_modality in ("hybrid", "no_remote"):
                     continue
-                if attrs.get("lang") == "es":
+                lang = attrs.get("lang", "")
+                if lang and lang != "lang_not_specified" and lang not in allowed_langs:
                     continue
                 job_id = job.get("id")
                 if job_id and job_id not in seen_ids:
@@ -162,6 +188,7 @@ class GetOnBoardConnector(BaseConnector):
             "ats_type": detect_ats(url),
             "posted_date": posted_date,
             "remote_eligibility": None,
+            "job_language": attrs.get("lang") or "",
         }
 
     def get_source_name(self) -> str:
