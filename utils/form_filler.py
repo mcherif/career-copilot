@@ -705,6 +705,18 @@ async def _locate_field(page: Page, field: dict):
             return el
         except Exception:
             pass
+
+    # Last resort: find by placeholder (common on Ashby and other React ATSes
+    # that don't use <label for=...> but do set placeholder attributes).
+    placeholder = field.get("placeholder")
+    if placeholder:
+        try:
+            el = await page.get_by_placeholder(placeholder).first.element_handle()
+            if el and await el.is_visible():
+                return el
+        except Exception:
+            pass
+
     return None
 
 
