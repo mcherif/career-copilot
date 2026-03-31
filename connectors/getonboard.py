@@ -188,7 +188,6 @@ class GetOnBoardConnector(BaseConnector):
             "ats_type": detect_ats(url),
             "posted_date": posted_date,
             "remote_eligibility": None,
-            "job_language": attrs.get("lang") or "",
         }
 
     def get_source_name(self) -> str:
