@@ -30,6 +30,7 @@ It fetches jobs from multiple sources, scores them against your profile, runs a 
 | Himalayas | JSON API | Worldwide-only remote jobs |
 | RemoteOK | JSON API | Remote jobs, worldwide-heavy |
 | WeWorkRemotely | RSS | Curated remote tech jobs |
+| Adzuna | JSON API | Multi-country tech jobs, remote-filtered |
 | Working Nomads | JSON API | Disabled by default (Proxify approval required) |
 
 Jobs older than 10 days are filtered out at fetch time across all sources.
