@@ -125,7 +125,7 @@ def _fetch_greenhouse(slug: str, company_name: str, target_roles: List[str]) -> 
 
 def _fetch_lever(slug: str, company_name: str, target_roles: List[str]) -> List[Dict[str, Any]]:
     url = f"https://api.lever.co/v0/postings/{slug}"
-    r = requests.get(url, params={"mode": "json"}, timeout=15)
+    r = requests.get(url, params={"mode": "json"}, timeout=30)
     if r.status_code == 404:
         logger.warning(f"Lever slug '{slug}' ({company_name}) returned 404")
         return []

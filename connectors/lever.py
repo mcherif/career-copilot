@@ -122,7 +122,7 @@ class LeverConnector(BaseConnector):
         response = requests.get(
             f"{BASE_URL}/{slug}",
             params={"mode": "json"},
-            timeout=15,
+            timeout=30,
         )
         if response.status_code == 404:
             logger.debug(f"Lever slug '{slug}' returned 404 — skipping")

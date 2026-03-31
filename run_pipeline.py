@@ -909,7 +909,11 @@ def open_job(job_id, queue_status, profile, headless, fill, dry_run):
                             await browser.close()
                             return
 
-                    fields = await scan_fields(active_page)
+                    try:
+                        fields = await scan_fields(active_page)
+                    except Exception as scan_err:
+                        click.echo(f"Page closed unexpectedly during scan ({scan_err}). Navigate manually.")
+                        fields = []
                     if fields:
                         click.echo(f"\nForm fields detected ({len(fields)}, * = required):")
                         click.echo(format_field_report(fields))
