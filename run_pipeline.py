@@ -27,6 +27,7 @@ from connectors.adzuna import AdzunaConnector
 from connectors.ashby import AshbyConnector
 from connectors.greenhouse import GreenhouseConnector
 from connectors.lever import LeverConnector
+from connectors.direct_ats import DirectATSConnector
 from utils.dedup import is_duplicate
 from utils.application_filter import has_already_applied
 from utils.llm_analysis import analyze_job_with_ollama
@@ -53,6 +54,7 @@ CONNECTORS = {
     "ashby": AshbyConnector,
     "greenhouse": GreenhouseConnector,
     "lever": LeverConnector,
+    "direct_ats": DirectATSConnector,
 }
 
 # Job listing domains that block Playwright (bot detection / OAuth walls).
@@ -493,7 +495,7 @@ def triage():
         session.close()
 
 @cli.command()
-@click.option('--source', required=True, type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'jobspresso', 'dynamitejobs', 'workingnomads', 'getonboard', 'himalayas', 'adzuna', 'ashby', 'greenhouse', 'lever', 'all']), help='Job source to fetch from')
+@click.option('--source', required=True, type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'jobspresso', 'dynamitejobs', 'workingnomads', 'getonboard', 'himalayas', 'adzuna', 'ashby', 'greenhouse', 'lever', 'direct_ats', 'all']), help='Job source to fetch from')
 @click.option('--dry-run', is_flag=True, help='Run pipeline without inserting jobs into database')
 def fetch(source: str, dry_run: bool):
     """Fetch remote jobs from the specified source."""
@@ -528,7 +530,7 @@ def analyze(profile: str, model: str, target_status: str, limit: int, dry_run: b
     _run_analyze(profile, model, target_status, limit, dry_run)
 
 @cli.command(name='full-run')
-@click.option('--source', default='all', type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'jobspresso', 'dynamitejobs', 'workingnomads', 'getonboard', 'himalayas', 'adzuna', 'ashby', 'greenhouse', 'lever', 'all']), show_default=True, help='Job source to fetch from')
+@click.option('--source', default='all', type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'jobspresso', 'dynamitejobs', 'workingnomads', 'getonboard', 'himalayas', 'adzuna', 'ashby', 'greenhouse', 'lever', 'direct_ats', 'all']), show_default=True, help='Job source to fetch from')
 @click.option('--profile', default='profile.yaml', help='Path to candidate profile YAML')
 @click.option('--model', default=config.OLLAMA_MODEL, help='Ollama model name')
 @click.option('--analyze-status', default=config.LLM_STATUS_DEFAULT, type=click.Choice(['review', 'shortlisted', 'rejected']), show_default=True, help='Job status bucket to analyze after evaluation')
@@ -687,7 +689,7 @@ def help_command():
         ("", "", ""),
         ("", "SOURCES", ""),
         ("", "remotive  arbeitnow  jobicy  jobspresso  dynamitejobs", ""),
-        ("", "workingnomads  getonboard  himalayas  adzuna  ashby  greenhouse  lever  (all = all enabled sources)", ""),
+        ("", "workingnomads  getonboard  himalayas  adzuna  ashby  greenhouse  lever  direct_ats  (all = all enabled sources)", ""),
         ("", "remoteok  weworkremotely  (disabled by default)", ""),
     ]
 
