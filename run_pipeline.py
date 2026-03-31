@@ -57,11 +57,9 @@ SYSTEM_BROWSER_DOMAINS = {
     "himalayas.app",
 }
 
-# Sources disabled from 'all' by default (subscription required or bot-protected).
+# Sources disabled from 'all' by default.
 # Enable individually with --source <name>.
 DISABLED_SOURCES = {
-    "remoteok",        # subscription required to apply
-    "weworkremotely",  # Cloudflare bot protection blocks automated browser
     "workingnomads",   # jobs go via Proxify — requires profile approval before applying
 }
 

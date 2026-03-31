@@ -26,9 +26,11 @@ It fetches jobs from multiple sources, scores them against your profile, runs a 
 | Jobspresso | RSS | Curated remote jobs |
 | Dynamite Jobs | RSS | Remote-first jobs |
 | Working Nomads | JSON API | Remote jobs for nomads |
-| GetOnBoard | JSON API | Tech jobs, LatAm-focused |
-| RemoteOK | JSON API | Disabled by default (subscription) |
-| WeWorkRemotely | RSS | Disabled by default (bot protection) |
+| GetOnBoard | JSON API | Tech jobs, LatAm-focused (fully remote only) |
+| Himalayas | JSON API | Worldwide-only remote jobs |
+| RemoteOK | JSON API | Remote jobs, worldwide-heavy |
+| WeWorkRemotely | RSS | Curated remote tech jobs |
+| Working Nomads | JSON API | Disabled by default (Proxify approval required) |
 
 Jobs older than 10 days are filtered out at fetch time across all sources.
 
