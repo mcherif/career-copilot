@@ -22,6 +22,7 @@ from connectors.jobspresso import JobspressoConnector
 from connectors.dynamitejobs import DynamiteJobsConnector
 from connectors.workingnomads import WorkingNomadsConnector
 from connectors.getonboard import GetOnBoardConnector
+from connectors.himalayas import HimalayasConnector
 from utils.dedup import is_duplicate
 from utils.application_filter import has_already_applied
 from utils.llm_analysis import analyze_job_with_ollama
@@ -43,6 +44,7 @@ CONNECTORS = {
     "dynamitejobs": DynamiteJobsConnector,
     "workingnomads": WorkingNomadsConnector,
     "getonboard": GetOnBoardConnector,
+    "himalayas": HimalayasConnector,
 }
 
 # Job listing domains that block Playwright (bot detection / OAuth walls).
@@ -484,7 +486,7 @@ def triage():
         session.close()
 
 @cli.command()
-@click.option('--source', required=True, type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'jobspresso', 'dynamitejobs', 'workingnomads', 'getonboard', 'all']), help='Job source to fetch from')
+@click.option('--source', required=True, type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'jobspresso', 'dynamitejobs', 'workingnomads', 'getonboard', 'himalayas', 'all']), help='Job source to fetch from')
 @click.option('--dry-run', is_flag=True, help='Run pipeline without inserting jobs into database')
 def fetch(source: str, dry_run: bool):
     """Fetch remote jobs from the specified source."""
@@ -519,7 +521,7 @@ def analyze(profile: str, model: str, target_status: str, limit: int, dry_run: b
     _run_analyze(profile, model, target_status, limit, dry_run)
 
 @cli.command(name='full-run')
-@click.option('--source', default='all', type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'jobspresso', 'dynamitejobs', 'workingnomads', 'getonboard', 'all']), show_default=True, help='Job source to fetch from')
+@click.option('--source', default='all', type=click.Choice(['remotive', 'remoteok', 'weworkremotely', 'arbeitnow', 'jobicy', 'jobspresso', 'dynamitejobs', 'workingnomads', 'getonboard', 'himalayas', 'all']), show_default=True, help='Job source to fetch from')
 @click.option('--profile', default='profile.yaml', help='Path to candidate profile YAML')
 @click.option('--model', default=config.OLLAMA_MODEL, help='Ollama model name')
 @click.option('--analyze-status', default=config.LLM_STATUS_DEFAULT, type=click.Choice(['review', 'shortlisted', 'rejected']), show_default=True, help='Job status bucket to analyze after evaluation')
@@ -677,7 +679,7 @@ def help_command():
         ("", "", ""),
         ("", "SOURCES", ""),
         ("", "remotive  arbeitnow  jobicy  jobspresso  dynamitejobs", ""),
-        ("", "workingnomads  getonboard  (all = all enabled sources)", ""),
+        ("", "workingnomads  getonboard  himalayas  (all = all enabled sources)", ""),
         ("", "remoteok  weworkremotely  (disabled by default)", ""),
     ]
 
