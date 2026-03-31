@@ -54,6 +54,7 @@ SYSTEM_BROWSER_DOMAINS = {
     "weworkremotely.com",
     "jobicy.com",
     "getonbrd.com",
+    "himalayas.app",
 }
 
 # Sources disabled from 'all' by default (subscription required or bot-protected).
