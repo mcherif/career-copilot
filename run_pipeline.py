@@ -562,6 +562,7 @@ def full_run(source: str, profile: str, model: str, analyze_status: str, analyze
         click.echo("")
         for status in ("shortlisted", "review"):
             _display_jobs_by_status(status, limit=20)
+        _print_stats()
 
     if email and not dry_run:
         session = SessionLocal()
@@ -703,9 +704,7 @@ def help_command():
             click.echo(f"{cmd_str}{desc}{opts_str}")
     click.echo("")
 
-@cli.command()
-def stats():
-    """Show a quick count of jobs by status."""
+def _print_stats():
     session = SessionLocal()
     try:
         from sqlalchemy import func
@@ -727,6 +726,11 @@ def stats():
         click.echo(click.style("  Tip: run 'full-run' to fetch and evaluate new jobs.", fg="cyan"))
     finally:
         session.close()
+
+@cli.command()
+def stats():
+    """Show a quick count of jobs by status."""
+    _print_stats()
 
 @cli.command()
 @click.option('--limit', default=20, type=int, show_default=True, help='Maximum number of shortlisted jobs to display')
