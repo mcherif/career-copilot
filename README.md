@@ -26,7 +26,7 @@ Job sources feed a local database. An AI evaluation agent applies rule-based fil
 
 <br>
 
-![Career Copilot Pipeline](docs/career-copilot-system-overview.png)
+![Career Copilot Pipeline](docs/career-copilot-system-overview-dark.png)
 
 Each job passes through ingestion, deterministic scoring, LLM semantic evaluation, and a status lifecycle — ending at the operator interface for final review and application.
 
