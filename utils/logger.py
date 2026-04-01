@@ -7,6 +7,21 @@ import colorlog
 LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
 
+_ANSI_GREEN  = '\x1b[32m'
+_ANSI_PURPLE = '\x1b[35m'
+
+
+class _ConnectorAwareFormatter(colorlog.ColoredFormatter):
+    """Colors connector INFO lines purple; everything else follows the normal level colors."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        result = super().format(record)
+        if record.name.endswith('_connector') and record.levelno == logging.INFO:
+            if result.startswith(_ANSI_GREEN):
+                result = _ANSI_PURPLE + result[len(_ANSI_GREEN):]
+        return result
+
+
 def setup_logger(name: str) -> logging.Logger:
     """Sets up a logger with a colored console handler (INFO) and rotating file handler (DEBUG)."""
     logger = logging.getLogger(name)
@@ -23,7 +38,7 @@ def setup_logger(name: str) -> logging.Logger:
     # 1. Console Handler (INFO level with colors)
     console_handler = colorlog.StreamHandler()
     console_handler.setLevel(logging.INFO)
-    console_formatter = colorlog.ColoredFormatter(
+    console_formatter = _ConnectorAwareFormatter(
         "%(log_color)s" + log_format,
         datefmt=date_format,
         log_colors={

@@ -21,68 +21,57 @@ The system performs four main tasks:
 
 ## System Pipeline
 
-Job Sources
--> Ingestion Pipeline
--> Normalization & Deduplication
--> SQLite Database
--> Career Intelligence Engine
--> LLM Job Analysis
--> Application Prefill Agent
--> Human Approval Gate
--> Application Submission
-
-Current implemented CLI orchestration:
-
 ```text
 python run_pipeline.py full-run
         |
         v
 [FETCH]
-  -> pull jobs from source
-  -> normalize
-  -> dedupe
-  -> insert new jobs
+  -> pull jobs from all enabled sources
+  -> normalize to unified schema
+  -> deduplicate (URL + company+title+location hash)
+  -> insert new jobs into SQLite
 
         |
         v
 [EVALUATE]
-  -> compute remote eligibility
+  -> compute remote_eligibility (rule-based classifier)
   -> compute rule-based fit_score
-  -> assign rule_status
+  -> assign rule_status (shortlisted / review / rejected)
   -> initialize or preserve final status
   -> select recommended resume
 
         |
         v
 [ANALYZE]
-  -> send selected jobs to Ollama
-  -> structured JSON reasoning
+  -> send review-status jobs to local Ollama LLM
+  -> structured JSON reasoning (fit score, strengths, gaps)
   -> conservative promotion/demotion
   -> persist LLM fields
 ```
 
-Result in `jobs`:
+Result persisted per job:
 
 ```text
 job metadata
-rule_status + rule-based scoring
-recommended resume
+rule_status + fit_score
+recommended_resume
 LLM reasoning + confidence
-final job status
+final status
 ```
 
-State model:
+---
 
-- Deterministic layer:
-  - `rule_status`
-  - `fit_score`
-- Semantic layer:
-  - `llm_fit_score`
-  - `recommendation`
-  - `llm_confidence`
-  - `llm_status`
-- Final decision layer:
-  - `status`
+## State Model
+
+Each job passes through three layers:
+
+| Layer | Fields | Notes |
+|---|---|---|
+| Deterministic | `rule_status`, `fit_score`, `remote_eligibility`, `matched_skills` | Always refreshed on re-evaluate |
+| Semantic (LLM) | `llm_fit_score`, `recommendation`, `llm_confidence`, `llm_status`, `fit_explanation`, `llm_strengths`, `skill_gaps` | Set by Ollama; preserved across re-evaluate |
+| Decision | `status` | Initialized from rule layer; updated by LLM; manually overridable |
+
+Evaluation policy: `evaluate` always refreshes `rule_status` but only touches final `status` when the job has not already been refined by a successful LLM analysis. This prevents `evaluate --all-jobs` from erasing prior LLM promotions or manual decisions.
 
 ---
 
@@ -90,131 +79,107 @@ State model:
 
 ### Job Sources
 
-Implemented sources:
+Sources are implemented as `BaseConnector` subclasses in `connectors/`.
 
-- Remotive API
+**Aggregate job boards (JSON/RSS):**
 
-Planned sources (stubs exist, not yet tested):
+| Connector | Source | Notes |
+|---|---|---|
+| `RemotiveConnector` | Remotive API | General remote tech jobs |
+| `RemoteOKConnector` | RemoteOK API | Only jobs with extractable ATS links (avoids subscription wall) |
+| `WeWorkRemotelyConnector` | WWR RSS | Curated remote tech jobs |
+| `ArbeitnowConnector` | Arbeitnow API | EU-focused remote jobs |
+| `JobicyConnector` | Jobicy API | Remote tech jobs |
+| `JobspressoConnector` | Jobspresso RSS | Curated remote jobs |
+| `DynamiteJobsConnector` | Dynamite Jobs RSS | Remote-first jobs |
+| `GetOnBoardConnector` | GetOnBoard API | LatAm-focused, fully remote only |
+| `HimalayasConnector` | Himalayas API | Worldwide-only remote jobs |
+| `AdzunaConnector` | Adzuna API | 8 countries (gb/de/fr/nl/at/be/au/ca), remote-filtered |
 
-- RemoteOK JSON endpoint
-- Greenhouse company boards
+**Direct ATS connectors:**
+
+| Connector | Source | Notes |
+|---|---|---|
+| `DirectATSConnector` | Ashby / Greenhouse / Lever / Workable | Curated `target_companies` list from `profile.yaml`; ATS auto-detected from `careers_url` host |
+| `AshbyConnector` | Ashby API | DB-discovered Ashby boards not in the Direct ATS list |
+| `GreenhouseConnector` | Greenhouse API | DB-discovered Greenhouse boards not in the Direct ATS list |
+| `LeverConnector` | Lever API | DB-discovered Lever boards not in the Direct ATS list |
+
+**Direct ATS host routing:**
+
+```
+jobs.ashbyhq.com          → Ashby  (GET /posting-api/job-board/{slug})
+boards.greenhouse.io       → Greenhouse  (GET /v1/boards/{slug}/jobs)
+job-boards.greenhouse.io   → Greenhouse
+jobs.lever.co              → Lever  (GET /v0/postings/{slug}?mode=json)
+apply.workable.com         → Workable  (POST /api/v3/accounts/{slug}/jobs)
+```
+
+### Remote Eligibility Filter (`utils/remote_filter.py`)
+
+`classify_remote_eligibility(job, profile)` returns `accept`, `review`, or `reject`.
+
+Key rejection patterns (in order):
+
+1. `raw_location` matches known US-only location strings (`usa`, `united states`, `us`)
+2. Greenhouse-style prefixes: `us-remote`, `us-east`, `us-west`, etc.
+3. US substrings in location (`united states`, ` usa`, `(u.s.)`, `(us)`, etc.) unless a broad-region override (`worldwide`, `emea`, etc.) is also present
+4. `Remote - [Country]` pattern where the country is not in the user's `accepted_regions`
+5. Description contains hard-reject keywords (`us only`, `must reside in the us`, `security clearance required`, etc.)
+6. Geographic-only locations with no `remote`/`worldwide`/`global` hint and no accepted-region match
 
 ### Ingestion Pipeline
 
-Responsible for:
+`run_pipeline.py` orchestrates:
 
-- fetching job listings
-- rate limiting
-- retry logic
-- pipeline run tracking
-
-### Normalization & Deduplication
-
-All job sources are converted into a unified internal schema.
-
-Duplicates are detected using:
-
-- URL matching
-- Hash of `(company + title + location)`
+- fetching from each connector
+- normalizing via `connector.normalize(raw_job)`
+- deduplication via `utils/dedup.py` (URL + content hash)
+- upsert into `jobs` table
 
 ### Database Layer
 
-Stack:
+- SQLite via SQLAlchemy
+- Migrations via Alembic
+- Tables: `jobs`, `application_history`, `pipeline_runs`
 
-- SQLite
-- SQLAlchemy
-- Alembic
+### Career Intelligence Engine (`utils/scoring.py`, `utils/application_filter.py`)
 
-Tables:
+Evaluates job relevance:
 
-- `jobs`
-- `application_history`
-- `pipeline_runs`
+- remote eligibility classification
+- rule-based `fit_score` from skill overlap, title match, seniority
+- blacklisted company filtering
+- resume selection (`utils/resume_selector.py`) — matches job keywords against resume tags
 
-The `jobs` table now intentionally separates deterministic and final decision state so reevaluation does not overwrite LLM-refined outcomes.
+### LLM Job Analysis (`utils/llm_analysis.py`)
 
-### Career Intelligence Engine
+Uses local LLM models through **Ollama** (`/api/chat`):
 
-Evaluates job relevance using:
+- structured JSON output with fit score, strengths, gaps, recommendation
+- conservative status updates: only promotes review→shortlist or review→rejected
+- malformed or failed responses do not break the pipeline
+- LLM output stored in dedicated fields; never overwrites `rule_status`
 
-- remote eligibility filtering
-- rule-based scoring
-- application history checks
-- resume selection
+### Application Prefill Agent (`utils/form_inspector.py`, `utils/form_filler.py`)
 
-The `evaluate` step persists deterministic fields back to the `jobs` table:
+`open-job` opens a shortlisted job in a Playwright browser window and:
 
-- `fit_score`
-- `rule_status`
-- `remote_eligibility`
-- `recommended_resume`
-
-Evaluation policy:
-
-- newly fetched jobs start as `status='new'`
-- `evaluate` always refreshes `rule_status`
-- `evaluate` only initializes or updates final `status` when the job has not already been refined by a successful LLM analysis
-- this prevents `evaluate --all-jobs` from erasing previous LLM promotions or rejections
-
-### LLM Job Analysis
-
-Uses local LLM models through **Ollama** for deeper evaluation:
-
-- fit scoring
-- strengths and skill gaps
-- apply/skip recommendation
-
-The current implementation uses the Ollama `/api/chat` endpoint with structured JSON output and conservative status updates:
-
-- only selected jobs are analyzed, defaulting to `status='review'`
-- malformed or failed LLM responses do not break the pipeline
-- LLM output is persisted into dedicated fields such as:
-  - `llm_fit_score`
-  - `llm_strengths`
-  - `fit_explanation`
-  - `skill_gaps`
-  - `recommendation`
-  - `llm_confidence`
-  - `llm_status`
-- LLM analysis updates the final operational `status`, but does not overwrite `rule_status`
-
-### Human Review Commands
-
-The current CLI includes human-facing review shortcuts for inspecting the queue without querying SQLite directly:
-
-- `python run_pipeline.py shortlist`
-- `python run_pipeline.py review`
-- `python run_pipeline.py rejected`
-
-These commands present the current final `status`, rule-based score, LLM recommendation, LLM confidence, and recommended resume in a review-friendly format.
-
-### Application Prefill Agent
-
-> **Not yet implemented.** A proof-of-concept (`playground_playwright.py`) exists that opens a shortlisted job URL in a Chromium browser via Playwright. Full ATS-specific form detection and field prefilling has not been built yet.
-
-Planned support:
-
-- Greenhouse
-- Lever
-
-Unsupported platforms will fall back to manual mode.
+1. Detects ATS from the job URL (`utils/ats_detector.py`)
+2. Scans visible form fields — captures `tag`, `type`, `name`, `id`, `placeholder`, `label` (via `<label for=...>`, `aria-label`, or `aria-labelledby`)
+3. Builds DOM context for unlabeled fields by walking up the element tree
+4. Fills text fields by matching labels against `_TEXT_RULES` (name, email, phone, LinkedIn, GitHub, location, etc.)
+5. Handles checkboxes (skills, consent, availability) and radio groups (timezone, career type)
+6. Uploads the recommended resume via native file dialog interception
+7. Bot-protected sites (RemoteOK, WeWorkRemotely, Jobicy) open in the system browser without prefill
 
 ### Human Approval Gate
 
-> **Not yet implemented.** Human review is currently done via the CLI review commands (`shortlist`, `review`, `rejected`), which display job details without triggering any submission.
+All submissions are manual. The pipeline:
 
-Planned behaviour once implemented:
+- opens the form in a visible browser window
+- prefills what it can
+- waits for the user to review, edit, and submit
+- prompts to mark the job as `applied` after submission
 
-- approve
-- edit
-- skip
-
-### Application Submission
-
-> **Not yet implemented.**
-
-Planned behaviour once implemented:
-
-- the application is submitted
-- the result is logged
-- `application_history` is updated
+`application_history` is updated on mark-applied.

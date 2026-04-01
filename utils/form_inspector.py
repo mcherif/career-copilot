@@ -173,6 +173,22 @@ async def scan_fields(page: Page) -> list[dict]:
                 if not label_text:
                     label_text = await el.get_attribute("aria-label") or ""
 
+                # Fall back to aria-labelledby (common in React ATSes like Ashby).
+                if not label_text:
+                    labelledby = await el.get_attribute("aria-labelledby") or ""
+                    if labelledby:
+                        try:
+                            texts = []
+                            for lid in labelledby.split():
+                                lel = await page.query_selector(f"#{lid}")
+                                if lel:
+                                    t = (await lel.inner_text()).strip()
+                                    if t:
+                                        texts.append(t)
+                            label_text = " ".join(texts)
+                        except Exception:
+                            pass
+
                 # Skip fully anonymous inputs (e.g. Notion editor divs rendered
                 # as contenteditable that also emit input events).
                 if not any([name, field_id, placeholder, label_text]):

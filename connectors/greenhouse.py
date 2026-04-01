@@ -41,14 +41,22 @@ def _load_slugs_from_db() -> Set[str]:
     return slugs
 
 
-def _load_slugs_from_profile() -> Set[str]:
+def _load_excluded_slugs() -> Set[str]:
+    """Return slugs already handled by direct_ats or belonging to blacklisted companies."""
+    excluded: Set[str] = set()
     try:
         with open("profile.yaml", encoding="utf-8") as f:
             profile = yaml.safe_load(f) or {}
-        entries = profile.get("target_companies", {}).get("greenhouse", [])
-        return {str(s).lower() for s in entries}
+        for entry in profile.get("target_companies", []):
+            if isinstance(entry, dict):
+                m = _SLUG_RE.search(entry.get("careers_url", ""))
+                if m:
+                    excluded.add(m.group(1).lower())
+        for name in profile.get("blacklisted_companies", []):
+            excluded.add(str(name).strip().lower().replace(" ", "-"))
     except Exception:
-        return set()
+        pass
+    return excluded
 
 
 def _load_target_roles() -> List[str]:
@@ -81,7 +89,8 @@ class GreenhouseConnector(BaseConnector):
         self.source_name = "greenhouse"
 
     def fetch_jobs(self) -> List[Dict[str, Any]]:
-        slugs = _load_slugs_from_db() | _load_slugs_from_profile()
+        excluded = _load_excluded_slugs()
+        slugs = _load_slugs_from_db() - excluded
 
         if not slugs:
             logger.info("No Greenhouse slugs found — skipping")

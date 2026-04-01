@@ -42,15 +42,24 @@ def _load_slugs_from_db() -> Set[str]:
     return slugs
 
 
-def _load_slugs_from_profile() -> Set[str]:
-    """Read optional target_companies.ashby list from profile.yaml."""
+def _load_excluded_slugs() -> Set[str]:
+    """Return slugs already handled by direct_ats or belonging to blacklisted companies."""
+    excluded: Set[str] = set()
     try:
         with open("profile.yaml", encoding="utf-8") as f:
             profile = yaml.safe_load(f) or {}
-        entries = profile.get("target_companies", {}).get("ashby", [])
-        return {str(s).lower() for s in entries}
+        # Slugs covered by direct_ats target list
+        for entry in profile.get("target_companies", []):
+            if isinstance(entry, dict):
+                m = _SLUG_RE.search(entry.get("careers_url", ""))
+                if m:
+                    excluded.add(m.group(1).lower())
+        # Slugs derived from blacklisted company names
+        for name in profile.get("blacklisted_companies", []):
+            excluded.add(str(name).strip().lower().replace(" ", "-"))
     except Exception:
-        return set()
+        pass
+    return excluded
 
 
 def _load_target_roles() -> List[str]:
@@ -79,7 +88,8 @@ class AshbyConnector(BaseConnector):
         self.source_name = "ashby"
 
     def fetch_jobs(self) -> List[Dict[str, Any]]:
-        slugs = _load_slugs_from_db() | _load_slugs_from_profile()
+        excluded = _load_excluded_slugs()
+        slugs = _load_slugs_from_db() - excluded
 
         if not slugs:
             logger.info("No Ashby company slugs found — skipping (add companies via profile.yaml or run other sources first)")
@@ -113,7 +123,7 @@ class AshbyConnector(BaseConnector):
         jobs = response.json().get("jobs", [])
         results = []
         for job in jobs:
-            if job.get("workplaceType", "").lower() not in ("remote", ""):
+            if (job.get("workplaceType") or "").lower() not in ("remote", ""):
                 continue
             if not job.get("isRemote"):
                 continue
