@@ -8,8 +8,6 @@ multi-feed deduplication, and empty/malformed responses.
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
 
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # RSS fixture builders
@@ -213,7 +211,6 @@ class TestWWRFetch:
         assert len(ids) == len(set(ids))
 
     def test_one_feed_error_continues_to_next(self):
-        from requests.exceptions import HTTPError
         responses = [
             _mock_response(b"", 503),   # first feed fails
             _mock_response(_rss_envelope(_wwr_item()), 200),  # second succeeds

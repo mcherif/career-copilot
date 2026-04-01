@@ -2,7 +2,6 @@
 Tests for connectors/getonboard.py — GetOnBoardConnector.
 All HTTP calls are mocked.
 """
-import os
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
 
@@ -180,7 +179,7 @@ class TestFetchCategory:
         connector = self._connector()
         data = _page([_job()], total_pages=10)
         with patch(self._T, return_value=_mock_resp(data)) as mock_get:
-            jobs = connector._fetch_category("programming", set(), {"en"})
+            connector._fetch_category("programming", set(), {"en"})
         assert mock_get.call_count == MAX_PAGES
 
     def test_http_error_propagates(self):

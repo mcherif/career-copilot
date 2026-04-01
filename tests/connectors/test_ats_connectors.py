@@ -11,10 +11,9 @@ Covers:
   - Connector-specific logic (slug-based company name, URL building,
     date parsing, remote filtering, list-based description fallback)
 """
-from datetime import datetime, timezone
+from datetime import datetime
 from unittest.mock import patch, MagicMock
 
-import pytest
 from requests.exceptions import HTTPError, ConnectionError as RequestsConnectionError
 
 

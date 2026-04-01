@@ -3,10 +3,8 @@ Tests for connectors/direct_ats.py — pure helper functions and per-ATS fetcher
 
 All HTTP calls are mocked. profile.yaml loading uses tmp_path + monkeypatch.
 """
-import os
 from unittest.mock import patch, MagicMock
 
-import pytest
 import yaml
 
 
@@ -97,7 +95,6 @@ class TestLoadTargetCompanies:
             ]
         })
         monkeypatch.chdir(tmp_path)
-        from importlib import reload
         import connectors.direct_ats as m
         companies = m._load_target_companies()
         assert len(companies) == 1

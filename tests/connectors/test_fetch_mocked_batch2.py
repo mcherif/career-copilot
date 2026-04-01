@@ -9,8 +9,6 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
 
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -46,10 +44,14 @@ def _item_et(title="Acme: Backend Engineer",
              description="desc"):
     """Build stdlib ET item element (link.tail = URL pattern)."""
     item = ET.Element("item")
-    t = ET.SubElement(item, "title"); t.text = title
-    link = ET.SubElement(item, "link"); link.tail = guid
-    d = ET.SubElement(item, "description"); d.text = description
-    p = ET.SubElement(item, "pubDate"); p.text = pub
+    t = ET.SubElement(item, "title")
+    t.text = title
+    link = ET.SubElement(item, "link")
+    link.tail = guid
+    d = ET.SubElement(item, "description")
+    d.text = description
+    p = ET.SubElement(item, "pubDate")
+    p.text = pub
     return ET.tostring(item, encoding="unicode")
 
 

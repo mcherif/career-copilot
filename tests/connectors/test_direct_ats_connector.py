@@ -3,7 +3,6 @@ Tests for DirectATSConnector.fetch_jobs() and normalize() — the orchestrating 
 Pure helper functions are tested in test_direct_ats.py.
 """
 from unittest.mock import patch, MagicMock
-import connectors.direct_ats as _m
 
 
 def _mock_job(ats="ashby", slug="acme"):

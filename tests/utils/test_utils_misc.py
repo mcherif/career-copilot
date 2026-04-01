@@ -4,8 +4,6 @@ Tests for smaller utils: application_filter, resume_selector, email_report, logg
 import os
 from unittest.mock import patch, MagicMock
 
-import pytest
-
 from models.database import ApplicationHistory
 
 
@@ -186,7 +184,6 @@ class TestSendReport:
                  "EMAIL_SMTP_PORT": "587"}
 
         mock_server = MagicMock()
-        mock_smtp_cls = MagicMock(return_value=__import__("contextlib").nullcontext(mock_server))
 
         with patch("utils.email_report._get_credential", side_effect=lambda k: creds.get(k, "")), \
              patch("smtplib.SMTP") as smtp_cls:
