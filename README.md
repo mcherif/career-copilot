@@ -20,9 +20,15 @@ The goal is not to automate applying. It is to eliminate the mechanical work tha
 
 ## System Architecture
 
-![Career Copilot System Overview](docs/career-copilot-system-overview.png)
+![Career Copilot Architecture](docs/career-copilot-agent-work.png)
 
-The Career Copilot pipeline discovers jobs from multiple sources, stores them in a local database, evaluates fit using deterministic rules and LLM reasoning, and exposes the results through a CLI workflow and natural-language assistant.
+Job sources feed a local database. An AI evaluation agent applies rule-based filters and LLM reasoning. The operator interacts through a CLI, a natural language assistant, and an ATS automation layer.
+
+<br>
+
+![Career Copilot Pipeline](docs/career-copilot-system-overview.png)
+
+Each job passes through ingestion, deterministic scoring, LLM semantic evaluation, and a status lifecycle — ending at the operator interface for final review and application.
 
 ---
 
