@@ -118,7 +118,7 @@ If the model is missing or Ollama isn't responding, common fixes:
 | Slow or no response | The model is loading — wait ~30 seconds on first run |
 | Want a faster/smaller model | `ollama pull qwen2.5:3b` and update `OLLAMA_MODEL` in `.env` |
 
-Once Ollama is set up, you can use the built-in assistant for any further troubleshooting:
+**Once Ollama is set up, you can use the built-in assistant for any further troubleshooting:**
 
 ```powershell
 python run_pipeline.py ask
