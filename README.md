@@ -53,26 +53,30 @@ ATS Automation
 
 ---
 
-## Decision Layers
+## Decision Architecture
 
-Each job passes through three evaluation layers:
+Each job passes through three independent decision layers. The layered design reflects a deliberate engineering choice: deterministic filters handle objective criteria cheaply and fast, the LLM handles semantic ambiguity, and the human operator handles judgment calls that neither layer should make alone.
 
-**1. Deterministic scoring**
-- Remote eligibility (geographic pattern matching, US-only rejection, region acceptance)
-- Role relevance (title keyword matching against target roles)
-- Seniority alignment (preferred and acceptable levels from profile)
-- Skill overlap (matched skills and keywords from job description)
+```
+Layer 1 — Deterministic filters
+  remote eligibility    geographic pattern matching, US-only rejection, region acceptance
+  role relevance        title keyword matching against target roles
+  seniority alignment   preferred and acceptable levels from profile
+  skill overlap         matched skills and domain keywords from job description
+        ↓
+Layer 2 — LLM semantic evaluation  (local Ollama, no data leaves the machine)
+  semantic fit          job description evaluated against full candidate profile
+  structured output     JSON: fit score, strengths, skill gaps, recommendation
+  conservative updates  only promotes or rejects from review; never overwrites manual decisions
+        ↓
+Layer 3 — Human review
+  shortlisted           strong fit, ready to apply
+  review                borderline; human decides
+  rejected              poor fit or location mismatch
+  applied               submitted; tracked in application history
+```
 
-**2. LLM reasoning** (local Ollama model)
-- Semantic evaluation of job description vs. candidate profile
-- Structured JSON output: fit score, strengths, skill gaps, recommendation
-- Conservative promotion: only promotes or rejects from review, never overwrites manual decisions
-
-**3. Final classification**
-- `shortlisted` — strong fit, ready to apply
-- `review` — borderline, needs human judgment
-- `rejected` — poor fit or location mismatch
-- `applied` — submitted, tracked in history
+This hybrid architecture avoids the two failure modes of pure-ML systems (opaque decisions) and pure rule systems (missed semantic matches).
 
 ---
 
