@@ -53,8 +53,14 @@ class RemoteOKConnector(BaseConnector):
             response = requests.get(self.api_url, headers=headers, timeout=15)
             response.raise_for_status()
             data = response.json()
-            # Filter out the metadata object (slug == "legal" or no "position" key).
-            jobs = [item for item in data if isinstance(item, dict) and item.get("position")]
+            # Filter out the metadata object and jobs with no ATS URL in the
+            # description — those are only accessible with a RemoteOK subscription.
+            jobs = [
+                item for item in data
+                if isinstance(item, dict)
+                and item.get("position")
+                and _extract_ats_url(item.get("description", ""))
+            ]
             logger.info(f"Successfully fetched {len(jobs)} jobs from {self.source_name}")
             return jobs
         except Exception as e:
