@@ -20,21 +20,21 @@ It fetches jobs from multiple sources, scores them against your profile, runs a 
 
 | Source | Type | Notes |
 |---|---|---|
-| Remotive | JSON API | General remote tech jobs |
-| Arbeitnow | JSON API | European-focused remote jobs |
-| Jobicy | JSON API | Remote tech jobs |
-| Jobspresso | RSS | Curated remote jobs |
-| Dynamite Jobs | RSS | Remote-first jobs |
-| GetOnBoard | JSON API | Tech jobs, LatAm-focused (fully remote only) |
-| Himalayas | JSON API | Worldwide-only remote jobs |
-| RemoteOK | JSON API | Remote jobs — only jobs with extractable ATS links |
-| WeWorkRemotely | RSS | Curated remote tech jobs |
-| Adzuna | JSON API | Multi-country (gb/de/fr/nl/at/be/au/ca), remote-filtered |
-| Direct ATS | Multi-API | Curated company list from `profile.yaml` — auto-detects Ashby/Greenhouse/Lever/Workable |
+| [Remotive](https://remotive.com) | JSON API | General remote tech jobs |
+| [Arbeitnow](https://www.arbeitnow.com) | JSON API | European-focused remote jobs |
+| [Jobicy](https://jobicy.com) | JSON API | Remote tech jobs |
+| [Jobspresso](https://jobspresso.co) | RSS | Curated remote jobs |
+| [Dynamite Jobs](https://dynamitejobs.com) | RSS | Remote-first jobs |
+| [GetOnBoard](https://www.getonbrd.com) | JSON API | Tech jobs, LatAm-focused (fully remote only) |
+| [Himalayas](https://himalayas.app) | JSON API | Worldwide-only remote jobs |
+| [RemoteOK](https://remoteok.com) | JSON API | Remote jobs — only jobs with extractable ATS links |
+| [WeWorkRemotely](https://weworkremotely.com) | RSS | Curated remote tech jobs |
+| [Adzuna](https://www.adzuna.com) | JSON API | Multi-country (gb/de/fr/nl/at/be/au/ca), remote-filtered |
+| Direct ATS | Multi-API | Curated company list from `profile.yaml` — auto-detects [Ashby](https://ashbyhq.com) / [Greenhouse](https://greenhouse.io) / [Lever](https://lever.co) / [Workable](https://workable.com) |
 | Ashby | JSON API | DB-discovered Ashby boards not already in Direct ATS |
 | Greenhouse | JSON API | DB-discovered Greenhouse boards not already in Direct ATS |
 | Lever | JSON API | DB-discovered Lever boards not already in Direct ATS |
-| Working Nomads | JSON API | Disabled by default (Proxify approval required) |
+| [Working Nomads](https://www.workingnomads.com) | JSON API | Disabled by default (Proxify approval required) |
 
 Jobs older than 10 days are filtered out at fetch time across all sources.
 

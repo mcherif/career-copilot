@@ -85,16 +85,16 @@ Sources are implemented as `BaseConnector` subclasses in `connectors/`.
 
 | Connector | Source | Notes |
 |---|---|---|
-| `RemotiveConnector` | Remotive API | General remote tech jobs |
-| `RemoteOKConnector` | RemoteOK API | Only jobs with extractable ATS links (avoids subscription wall) |
-| `WeWorkRemotelyConnector` | WWR RSS | Curated remote tech jobs |
-| `ArbeitnowConnector` | Arbeitnow API | EU-focused remote jobs |
-| `JobicyConnector` | Jobicy API | Remote tech jobs |
-| `JobspressoConnector` | Jobspresso RSS | Curated remote jobs |
-| `DynamiteJobsConnector` | Dynamite Jobs RSS | Remote-first jobs |
-| `GetOnBoardConnector` | GetOnBoard API | LatAm-focused, fully remote only |
-| `HimalayasConnector` | Himalayas API | Worldwide-only remote jobs |
-| `AdzunaConnector` | Adzuna API | 8 countries (gb/de/fr/nl/at/be/au/ca), remote-filtered |
+| `RemotiveConnector` | [Remotive](https://remotive.com) | General remote tech jobs |
+| `RemoteOKConnector` | [RemoteOK](https://remoteok.com) | Only jobs with extractable ATS links (avoids subscription wall) |
+| `WeWorkRemotelyConnector` | [WeWorkRemotely](https://weworkremotely.com) | Curated remote tech jobs |
+| `ArbeitnowConnector` | [Arbeitnow](https://www.arbeitnow.com) | EU-focused remote jobs |
+| `JobicyConnector` | [Jobicy](https://jobicy.com) | Remote tech jobs |
+| `JobspressoConnector` | [Jobspresso](https://jobspresso.co) | Curated remote jobs |
+| `DynamiteJobsConnector` | [Dynamite Jobs](https://dynamitejobs.com) | Remote-first jobs |
+| `GetOnBoardConnector` | [GetOnBoard](https://www.getonbrd.com) | LatAm-focused, fully remote only |
+| `HimalayasConnector` | [Himalayas](https://himalayas.app) | Worldwide-only remote jobs |
+| `AdzunaConnector` | [Adzuna](https://www.adzuna.com) | 8 countries (gb/de/fr/nl/at/be/au/ca), remote-filtered |
 
 **Direct ATS connectors:**
 
