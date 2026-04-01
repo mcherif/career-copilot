@@ -2,8 +2,13 @@
 # profile.yaml is git-ignored to protect your personal information.
 
 personal:
-  name: "John Doe"
-  location: "New York, NY"
+  name: "Jane Doe"
+  email: "jane@example.com"
+  phone: "555-0100"
+  phone_country: "Canada"
+  linkedin: "https://www.linkedin.com/in/janedoe/"
+  github: "https://github.com/janedoe"
+  location: "Toronto, Canada"
   timezone: "EST"
 
 summary:
@@ -29,25 +34,46 @@ target_roles:
 seniority:
   preferred:
     - senior
+    - staff
   acceptable:
     - mid
+    - lead
+
+# Curated company list. careers_url is the ground truth — ATS is auto-detected from the host.
+# Supported hosts: jobs.ashbyhq.com, boards.greenhouse.io, job-boards.greenhouse.io,
+#                  jobs.lever.co, apply.workable.com
+target_companies:
+  - { name: "Example Corp", careers_url: "https://boards.greenhouse.io/examplecorp" }
+  - { name: "Another Co",   careers_url: "https://jobs.ashbyhq.com/anotherco" }
+
+blacklisted_companies:
+  - Example Blacklisted Co
+
+languages:
+  - english
 
 preferences:
   remote_only: true
   accepted_regions:
     - worldwide
+    - global
     - emea
+    - europe
+    - canada
   reject_regions:
     - us only
   contractor_ok: true
+  availability:
+    - long term
+    - permalance
 
 work_authorization:
-  emea: true
+  canada: true
   sponsorship_required: false
 
 resumes:
   - name: "general_swe"
-    path: "resumes/john_doe_swe.pdf"
+    path: "resumes/jane_doe_swe.pdf"
     tags:
       - software
       - backend
