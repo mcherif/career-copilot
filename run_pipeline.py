@@ -749,6 +749,50 @@ def stats():
     """Show a quick count of jobs by status."""
     _print_stats()
 
+
+@cli.command()
+@click.option('--days', default=14, type=int, show_default=True,
+              help='Mark jobs older than this many days as expired')
+@click.option('--dry-run', is_flag=True,
+              help='Show what would be expired without writing to DB')
+def prune(days: int, dry_run: bool):
+    """Expire stale jobs that are still in review/shortlisted/new after --days days."""
+    from datetime import datetime, timedelta, timezone
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    prunable_statuses = ("new", "review", "shortlisted")
+
+    session = SessionLocal()
+    try:
+        jobs = (
+            session.query(Job)
+            .filter(Job.status.in_(prunable_statuses))
+            .filter(Job.created_at < cutoff)
+            .all()
+        )
+
+        if not jobs:
+            click.echo(f"No stale jobs found (older than {days} days in {prunable_statuses}).")
+            return
+
+        by_status: dict = {}
+        for job in jobs:
+            by_status.setdefault(job.status, []).append(job)
+
+        click.echo(f"{'[DRY RUN] ' if dry_run else ''}Expiring {len(jobs)} jobs older than {days} days:")
+        for status, group in sorted(by_status.items()):
+            click.echo(f"  {status}: {len(group)}")
+
+        if not dry_run:
+            for job in jobs:
+                job.status = "expired"
+            session.commit()
+            click.echo(click.style(f"Done — {len(jobs)} jobs marked as expired.", fg="yellow"))
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
 @cli.command()
 @click.option('--limit', default=20, type=int, show_default=True, help='Maximum number of shortlisted jobs to display')
 def shortlist(limit: int):

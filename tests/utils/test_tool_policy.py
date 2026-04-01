@@ -151,7 +151,7 @@ class TestPolicyRunPipeline:
 
 class TestTransitionTable:
     def test_all_statuses_present(self):
-        statuses = {"new", "review", "shortlisted", "rejected", "applied", "deferred"}
+        statuses = {"new", "review", "shortlisted", "rejected", "applied", "deferred", "expired"}
         assert statuses == set(_VALID_TRANSITIONS.keys())
 
     def test_applied_has_no_transitions(self):

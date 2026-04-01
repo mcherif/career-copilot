@@ -308,6 +308,7 @@ _VALID_TRANSITIONS: dict[str, set] = {
     "rejected":   {"review"},
     "deferred":   {"review", "rejected"},
     "applied":    set(),  # terminal
+    "expired":    {"review"},  # can be rescued manually
 }
 
 
