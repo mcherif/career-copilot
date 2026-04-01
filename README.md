@@ -22,6 +22,8 @@ The goal is not to automate applying. It is to eliminate the mechanical work tha
 
 ![Career Copilot System Overview](docs/career-copilot-system-overview.png)
 
+The Career Copilot pipeline discovers jobs from multiple sources, stores them in a local database, evaluates fit using deterministic rules and LLM reasoning, and exposes the results through a CLI workflow and natural-language assistant.
+
 ---
 
 ## Key Features
