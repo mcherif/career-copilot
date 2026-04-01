@@ -78,6 +78,7 @@ Run `python run_pipeline.py help` for the full reference. Key commands:
 | `review` | List review jobs |
 | `rescore` | Re-apply scoring rules to existing review jobs |
 | `setup-credentials` | Store email credentials in Windows Credential Manager |
+| `ask` | Start the interactive LLM assistant |
 
 ---
 
@@ -174,6 +175,29 @@ resumes:         # multiple resumes with tags — best match selected per job
 6. Prompts you to mark the job as `applied`
 
 Bot-protected sites (remoteok.com, weworkremotely.com, jobicy.com) open in your system browser without prefill.
+
+---
+
+## LLM Assistant
+
+```powershell
+python run_pipeline.py ask
+```
+
+An interactive chat interface powered by your local Ollama model. Unlike a generic chatbot, the assistant has live access to your jobs database and system via a set of built-in tools:
+
+| Tool | What it answers |
+|---|---|
+| `count_jobs_by_status` | "how many shortlisted jobs do I have?" |
+| `get_jobs_by_status` | "show me my review jobs" |
+| `get_top_jobs` | "what are my best matches?" |
+| `search_jobs` | "do I have any jobs at Anthropic?" |
+| `get_job_detail` | "tell me more about job 42" |
+| `get_job_description` | "show me the full description for job 42" |
+| `get_pipeline_stats` | "how many jobs were fetched in total?" |
+| `get_schedule` | "when does the pipeline run automatically?" |
+
+The assistant calls the appropriate tool, runs the real query, and responds in natural language — it never guesses or makes up data. Conversation history is maintained within the session so you can ask follow-up questions.
 
 ---
 
