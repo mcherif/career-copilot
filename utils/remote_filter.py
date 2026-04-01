@@ -109,6 +109,10 @@ def classify_remote_eligibility(job: Dict[str, Any], profile: Dict[str, Any] | N
     if raw_location in US_ONLY_LOCATIONS:
         return "reject"
 
+    # Catch Greenhouse-style "US-Remote", "US-East", "US-West" etc.
+    if raw_location.startswith("us-") or raw_location.startswith("us "):
+        return "reject"
+
     # Catch "Remote - United States", "Remote (U.S.)", "Remote (US)", etc.
     if any(us in raw_location for us in _US_LOCATION_SUBSTRINGS):
         if not any(broad in raw_location for broad in _BROAD_REGION_OVERRIDES):
