@@ -155,7 +155,7 @@ blacklisted_companies:
 preferences:
   remote_only: true
   accepted_regions: [worldwide, emea, europe, canada, ...]
-  reject_regions: [us only, israel only]
+  reject_regions: [us only]
   contractor_ok: true
 resumes:         # multiple resumes with tags — best match selected per job
 ```
