@@ -151,3 +151,20 @@ resumes:         # multiple resumes with tags — best match selected per job
 6. Prompts you to mark the job as `applied`
 
 Bot-protected sites (remoteok.com, weworkremotely.com, jobicy.com) open in your system browser without prefill.
+
+---
+
+## Glossary
+
+| Term | Definition |
+|---|---|
+| **ATS** | Applicant Tracking System — software companies use to manage job postings and applications (e.g. Greenhouse, Lever, Ashby, Workable) |
+| **DB** | Database — the local SQLite file that stores all fetched jobs and their evaluation state |
+| **EMEA** | Europe, Middle East and Africa — a common geographic region grouping used in job postings |
+| **JSON API** | An HTTP endpoint that returns structured data in JSON format |
+| **LatAm** | Latin America |
+| **LLM** | Large Language Model — an AI model used here via Ollama to semantically evaluate job fit |
+| **Ollama** | A local LLM runtime that runs models on your own machine — no data sent to external services |
+| **RSS** | Really Simple Syndication — a feed format used by some job boards to publish listings |
+| **SMTP** | Simple Mail Transfer Protocol — the standard used to send email reports |
+| **YAML** | A human-readable configuration file format — used for `profile.yaml` |
