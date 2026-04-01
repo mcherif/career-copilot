@@ -1066,7 +1066,7 @@ def _read_recent_logs(n_lines: int = 60) -> str:
 def ask(model: str):
     """Start an interactive assistant chat powered by your local Ollama LLM (with live DB access)."""
     import requests as _requests
-    from utils.ask_tools import TOOL_SCHEMAS, dispatch_tool
+    from utils.ask_tools import TOOL_SCHEMAS, dispatch_tool, ACTION_TOOLS, tool_policy_check, confirmation_prompt
 
     # Verify Ollama is reachable before entering the loop.
     try:
@@ -1153,7 +1153,24 @@ def ask(model: str):
 
                     click.echo(click.style(f"  → {fn_name}({fn_args})", fg="yellow"))
 
-                    result = dispatch_tool(fn_name, fn_args, session)
+                    if fn_name in ACTION_TOOLS:
+                        # Policy gate — check preconditions before prompting
+                        policy = tool_policy_check(fn_name, fn_args, session)
+                        if "error" in policy:
+                            result = policy
+                        else:
+                            prompt = confirmation_prompt(fn_name, fn_args, session)
+                            click.echo(click.style(f"  {prompt} [y/N] ", fg="yellow"), nl=False)
+                            try:
+                                answer = input().strip().lower()
+                            except (EOFError, KeyboardInterrupt):
+                                answer = "n"
+                            if answer == "y":
+                                result = dispatch_tool(fn_name, fn_args, session)
+                            else:
+                                result = {"cancelled": True, "message": "Action cancelled by user."}
+                    else:
+                        result = dispatch_tool(fn_name, fn_args, session)
 
                     messages.append({
                         "role": "tool",

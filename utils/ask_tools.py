@@ -15,6 +15,8 @@ Pass 3 — external action tools (email): see future commits
 
 import json
 import subprocess
+import sys
+from datetime import datetime, timedelta
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -293,10 +295,135 @@ def get_top_shortlisted_jobs(session: Session, limit: int = 10) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Pass 2 — action tools (confirmation required before execution)
+# ---------------------------------------------------------------------------
+
+ACTION_TOOLS = {"open_job", "mark_job_status", "run_full_pipeline"}
+
+# Valid status transitions — terminal states have an empty set
+_VALID_TRANSITIONS: dict[str, set] = {
+    "new":        {"review", "shortlisted", "rejected", "deferred"},
+    "review":     {"shortlisted", "rejected", "deferred"},
+    "shortlisted":{"applied", "rejected", "deferred"},
+    "rejected":   {"review"},
+    "deferred":   {"review", "rejected"},
+    "applied":    set(),  # terminal
+}
+
+
+def tool_policy_check(name: str, args: dict, session: Session) -> dict:
+    """Pre-confirmation policy gate. Returns {"ok": True} or {"error": "..."}."""
+    if name == "open_job":
+        job = session.query(Job).filter(Job.id == args.get("job_id")).first()
+        if not job:
+            return {"error": f"Job {args.get('job_id')} not found"}
+        if not job.url:
+            return {"error": f"Job {args.get('job_id')} has no URL"}
+        return {"ok": True}
+
+    if name == "mark_job_status":
+        job_id, new_status = args.get("job_id"), args.get("status")
+        job = session.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            return {"error": f"Job {job_id} not found"}
+        allowed = _VALID_TRANSITIONS.get(job.status, set())
+        if new_status not in allowed:
+            if not allowed:
+                return {"error": f"Job {job_id} is '{job.status}' — terminal state, no further transitions allowed"}
+            return {"error": f"Cannot move job {job_id} from '{job.status}' to '{new_status}'. Allowed: {sorted(allowed)}"}
+        return {"ok": True}
+
+    if name == "run_full_pipeline":
+        cutoff = datetime.utcnow() - timedelta(minutes=10)
+        active = (
+            session.query(PipelineRun)
+            .filter(PipelineRun.started_at >= cutoff, PipelineRun.completed_at.is_(None))
+            .first()
+        )
+        if active:
+            return {"error": f"Pipeline may already be running (started {active.started_at}). Check with 'get_recent_runs'."}
+        return {"ok": True}
+
+    return {"ok": True}
+
+
+def confirmation_prompt(name: str, args: dict, session: Session) -> str:
+    """Return a human-readable confirmation string for an action tool."""
+    if name == "open_job":
+        job = session.query(Job).filter(Job.id == args.get("job_id")).first()
+        if job:
+            return f"Open job {job.id} ({job.title} @ {job.company}) in the browser?"
+        return f"Open job {args.get('job_id')} in the browser?"
+
+    if name == "mark_job_status":
+        job_id, new_status = args.get("job_id"), args.get("status")
+        job = session.query(Job).filter(Job.id == job_id).first()
+        if job:
+            return f"Mark job {job_id} ({job.title} @ {job.company}) as '{new_status}'? (currently: '{job.status}')"
+        return f"Mark job {job_id} as '{new_status}'?"
+
+    if name == "run_full_pipeline":
+        src = args.get("source")
+        suffix = f" (source: {src})" if src else ""
+        return f"Run the full pipeline{suffix}? This may take several minutes."
+
+    return f"Execute {name}?"
+
+
+def open_job(session: Session, job_id: int) -> dict:
+    """Open a job in the browser using the existing open-job command (with Playwright prefill)."""
+    job = session.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        return {"error": f"Job {job_id} not found"}
+    try:
+        # Delegate to the CLI command — it handles Playwright, bot-detection, applied marking.
+        # subprocess.run blocks until the user closes the browser session, which is correct.
+        subprocess.run(
+            [sys.executable, "run_pipeline.py", "open-job", "--job-id", str(job_id)],
+            check=False,
+        )
+        return {"success": True, "message": f"Browser session for job {job_id} ({job.title} @ {job.company}) completed."}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def mark_job_status(session: Session, job_id: int, status: str) -> dict:
+    """Update a job's lifecycle status."""
+    job = session.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        return {"error": f"Job {job_id} not found"}
+    old_status = job.status
+    job.status = status
+    try:
+        session.commit()
+        return {"success": True, "message": f"Job {job_id} ({job.title} @ {job.company}): '{old_status}' → '{status}'"}
+    except Exception as e:
+        session.rollback()
+        return {"error": str(e)}
+
+
+def run_full_pipeline(session: Session, source: str = None) -> dict:
+    """Launch the full pipeline as a background process (non-blocking)."""
+    cmd = [sys.executable, "run_pipeline.py", "full-run"]
+    if source:
+        cmd += ["--source", source]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {
+            "success": True,
+            "pid": proc.pid,
+            "message": f"Pipeline started (PID {proc.pid}). Check progress with 'get_recent_runs' or 'get_pipeline_stats'.",
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
 # Registry and dispatch
 # ---------------------------------------------------------------------------
 
 TOOL_REGISTRY: dict = {
+    # Pass 1 — read-only
     "count_jobs_by_status": count_jobs_by_status,
     "get_jobs_by_status": get_jobs_by_status,
     "get_top_jobs": get_top_jobs,
@@ -308,6 +435,10 @@ TOOL_REGISTRY: dict = {
     "get_recent_runs": get_recent_runs,
     "get_jobs_needing_review": get_jobs_needing_review,
     "get_top_shortlisted_jobs": get_top_shortlisted_jobs,
+    # Pass 2 — actions (confirmation required)
+    "open_job": open_job,
+    "mark_job_status": mark_job_status,
+    "run_full_pipeline": run_full_pipeline,
 }
 
 
@@ -477,6 +608,64 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "limit": {"type": "integer", "description": "Number of jobs to return (default 10)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    # ---- Pass 2 — action tools ------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "open_job",
+            "description": (
+                "Open a job posting in the browser and trigger Playwright form prefill. "
+                "Use this when the user says 'open job N', 'apply to job N', or 'show me job N'. "
+                "Requires confirmation before executing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "integer", "description": "The job ID to open."},
+                },
+                "required": ["job_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mark_job_status",
+            "description": (
+                "Update the lifecycle status of a job. "
+                "Use this when the user says 'mark job N as applied', 'reject job N', 'shortlist job N', etc. "
+                "Valid transitions: review→shortlisted/rejected/deferred, shortlisted→applied/rejected/deferred, "
+                "rejected→review (undo), applied is terminal. "
+                "Requires confirmation before executing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "integer"},
+                    "status": {"type": "string", "enum": _STATUSES},
+                },
+                "required": ["job_id", "status"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_full_pipeline",
+            "description": (
+                "Launch the full job pipeline (fetch + evaluate + LLM analyze) as a background process. "
+                "Use this when the user says 'run the pipeline', 'refresh jobs', 'fetch new jobs', etc. "
+                "Requires confirmation before executing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string", "description": "Optional: limit to a specific source (e.g. 'ashby', 'remotive')."},
                 },
                 "required": [],
             },
