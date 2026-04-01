@@ -1042,6 +1042,13 @@ python run_pipeline.py ask                                 # This assistant
 - accepted_regions controls remote eligibility — add regions you can work from (emea, europe, canada, worldwide…)
 - resumes: each resume has tags — the pipeline picks the best match per job
 
+== AUTOMATED SCHEDULE ==
+Career Copilot is scheduled to run automatically via Windows Task Scheduler.
+Four tasks are registered (CareerCopilot-0800, CareerCopilot-1200, CareerCopilot-1600, CareerCopilot-2000),
+each running schedule_run.bat which executes: python run_pipeline.py full-run --email
+The schedule is: 8:00 AM, 12:00 PM, 4:00 PM, and 8:00 PM daily.
+To run manually at any time: python run_pipeline.py full-run
+
 Answer questions clearly and concisely. If you are unsure, say so rather than guessing.
 """
 
