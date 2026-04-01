@@ -1,3 +1,4 @@
+import os
 import sys
 import asyncio
 import click
@@ -686,6 +687,7 @@ def help_command():
         ("", "SETUP & EMAIL", ""),
         ("setup-credentials", "Store email credentials in Windows Credential Manager", ""),
         ("send-test-email", "Send a test email to verify SMTP setup", ""),
+        ("ask", "Chat with local Ollama LLM for troubleshooting help", "--model <model>"),
         ("", "", ""),
         ("", "SOURCES", ""),
         ("", "remotive  arbeitnow  jobicy  jobspresso  dynamitejobs", ""),
@@ -987,6 +989,142 @@ def open_job(job_id, queue_status, profile, headless, fill, dry_run):
 
     finally:
         session.close()
+
+
+_SYSTEM_PROMPT = """You are a helpful assistant embedded inside Career Copilot, a local job discovery and application pipeline.
+
+== PROJECT OVERVIEW ==
+Career Copilot fetches remote job listings from multiple sources (Remotive, RemoteOK, Adzuna, WeWorkRemotely, Himalayas, Greenhouse, Ashby, Lever, Workable, and others), scores them against a candidate profile, runs a local LLM analysis via Ollama, and assists with application form prefilling using Playwright.
+
+== KEY FILES ==
+- run_pipeline.py       — CLI entrypoint (commands: full-run, fetch, evaluate, analyze, triage, open-job, stats, ask)
+- profile.yaml          — Candidate config: skills, target_roles, seniority, accepted_regions, target_companies, blacklisted_companies, resumes
+- profile.template.yaml — Template to copy when setting up for the first time
+- config.py             — Env-driven settings (DATABASE_URL, OLLAMA_URL, OLLAMA_MODEL, email, etc.)
+- .env                  — Secrets (Adzuna API keys, email credentials); never committed to git
+- connectors/           — One file per job source; all implement BaseConnector (fetch_jobs + normalize)
+- utils/remote_filter.py — classify_remote_eligibility(): accept / review / reject
+- utils/form_filler.py  — Playwright form prefill logic
+- utils/form_inspector.py — Scans ATS form fields (supports aria-label, aria-labelledby, label[for=...])
+- utils/llm_analysis.py — Sends jobs to Ollama for semantic scoring
+- utils/logger.py       — Colored console + rotating file logger (logs/career_copilot.log)
+- models/database.py    — SQLAlchemy models: Job, PipelineRun, ApplicationHistory
+
+== COMMON ERRORS AND FIXES ==
+- "No module named X"            → Run: pip install -r requirements.txt (in the career-copilot conda env)
+- "Ollama connection refused"    → Start Ollama: ollama serve  (or check it's running)
+- "model not found"              → Pull the model: ollama pull qwen2.5:7b
+- "profile.yaml not found"      → Copy profile.template.yaml to profile.yaml and fill in your details
+- "DATABASE_URL not set"         → Check .env file exists and has the right values; copy .env.example if missing
+- "NoneType has no attribute"    → Usually a missing field in profile.yaml or a job with null data — check logs
+- "403 Forbidden" from RemoteOK  → Normal; that source requires a subscription for some jobs — pipeline skips them
+- "404 from Ashby/Greenhouse"    → Company slug is wrong or the company moved ATS — update careers_url in profile.yaml
+- Playwright browser doesn't open → Run: playwright install chromium
+- LinkedIn field not filling      → Fixed in form_inspector.py via aria-labelledby; ensure you have the latest code
+- Job marked shortlisted but wrong → Run: python run_pipeline.py rescore to re-apply rules
+
+== PIPELINE COMMANDS ==
+python run_pipeline.py full-run [--email] [--source all]   # Full fetch + score + LLM in one shot
+python run_pipeline.py fetch --source all                  # Fetch only
+python run_pipeline.py evaluate                            # Score fetched jobs
+python run_pipeline.py analyze                             # LLM pass on review jobs
+python run_pipeline.py triage                              # Work through review queue
+python run_pipeline.py open-job                            # Open & prefill application form
+python run_pipeline.py stats                               # Job counts by status
+python run_pipeline.py ask                                 # This assistant
+
+== CONFIGURATION TIPS ==
+- OLLAMA_MODEL in config.py (default: qwen2.5:7b) — change to any model you have pulled locally
+- To add a target company: add a line under target_companies in profile.yaml with name + careers_url
+- To blacklist a company: add its name under blacklisted_companies in profile.yaml
+- accepted_regions controls remote eligibility — add regions you can work from (emea, europe, canada, worldwide…)
+- resumes: each resume has tags — the pipeline picks the best match per job
+
+Answer questions clearly and concisely. If you are unsure, say so rather than guessing.
+"""
+
+
+def _read_recent_logs(n_lines: int = 60) -> str:
+    log_path = os.path.join(os.path.dirname(__file__), "logs", "career_copilot.log")
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        tail = "".join(lines[-n_lines:]).strip()
+        return tail if tail else "(no log entries yet)"
+    except FileNotFoundError:
+        return "(log file not found)"
+
+
+@cli.command()
+@click.option('--model', default=config.OLLAMA_MODEL, show_default=True, help='Ollama model to use')
+def ask(model: str):
+    """Start an interactive troubleshooting chat powered by your local Ollama LLM."""
+    import requests as _requests
+
+    # Verify Ollama is reachable before entering the loop.
+    try:
+        _requests.get("http://localhost:11434", timeout=3)
+    except Exception:
+        click.echo(click.style(
+            "Cannot reach Ollama at http://localhost:11434. "
+            "Start it with: ollama serve", fg="red"
+        ))
+        return
+
+    recent_logs = _read_recent_logs()
+    log_context = f"\n\n== RECENT LOG OUTPUT ==\n{recent_logs}"
+
+    messages = [{"role": "system", "content": _SYSTEM_PROMPT + log_context}]
+
+    click.echo("")
+    click.echo(click.style("  Career Copilot Assistant", fg="cyan", bold=True))
+    click.echo(click.style(f"  Model: {model}  |  Type 'exit' to quit", fg="white"))
+    click.echo("")
+
+    while True:
+        try:
+            user_input = click.prompt(click.style("You", fg="green", bold=True))
+        except (click.exceptions.Abort, EOFError):
+            break
+
+        if user_input.strip().lower() in ("exit", "quit", "q"):
+            break
+        if not user_input.strip():
+            continue
+
+        messages.append({"role": "user", "content": user_input})
+
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+        }
+
+        click.echo(click.style("\nAssistant: ", fg="cyan", bold=True), nl=False)
+        assistant_reply = []
+        try:
+            with _requests.post(config.OLLAMA_URL, json=payload, stream=True, timeout=120) as resp:
+                resp.raise_for_status()
+                for raw_line in resp.iter_lines():
+                    if not raw_line:
+                        continue
+                    try:
+                        chunk = json.loads(raw_line)
+                        token = chunk.get("message", {}).get("content", "")
+                        if token:
+                            click.echo(token, nl=False)
+                            assistant_reply.append(token)
+                        if chunk.get("done"):
+                            break
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            click.echo(click.style(f"\nError contacting Ollama: {e}", fg="red"))
+            messages.pop()  # Remove the unanswered user message
+            continue
+
+        click.echo("\n")
+        messages.append({"role": "assistant", "content": "".join(assistant_reply)})
 
 
 if __name__ == '__main__':
