@@ -150,6 +150,9 @@ The LLM layer produces structured JSON outputs with defined schemas. Malformed o
 | [RemoteOK](https://remoteok.com) | JSON API | Remote jobs — only jobs with extractable ATS links |
 | [WeWorkRemotely](https://weworkremotely.com) | RSS | Curated remote tech jobs |
 | [Adzuna](https://www.adzuna.com) | JSON API | Multi-country (gb/de/fr/nl/at/be/au/ca), remote-filtered |
+| [Real Work From Anywhere](https://www.realworkfromanywhere.com) | RSS | Worldwide-only curated remote jobs |
+| [EU Remote Jobs](https://euremotejobs.com) | RSS | European timezone remote jobs |
+| Remote AI Jobs | RSS | AI/ML-specific category feed (via Real Work From Anywhere) |
 | Direct ATS | Multi-API | Curated company list from `profile.yaml` — auto-detects [Ashby](https://ashbyhq.com) / [Greenhouse](https://greenhouse.io) / [Lever](https://lever.co) / [Workable](https://workable.com) |
 | Ashby | JSON API | DB-discovered Ashby boards not already in Direct ATS |
 | Greenhouse | JSON API | DB-discovered Greenhouse boards not already in Direct ATS |

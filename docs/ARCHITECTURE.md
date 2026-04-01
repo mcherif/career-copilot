@@ -95,6 +95,9 @@ Sources are implemented as `BaseConnector` subclasses in `connectors/`.
 | `GetOnBoardConnector` | [GetOnBoard](https://www.getonbrd.com) | LatAm-focused, fully remote only |
 | `HimalayasConnector` | [Himalayas](https://himalayas.app) | Worldwide-only remote jobs |
 | `AdzunaConnector` | [Adzuna](https://www.adzuna.com) | 8 countries (gb/de/fr/nl/at/be/au/ca), remote-filtered |
+| `RealWorkFromAnywhereConnector` | [Real Work From Anywhere](https://www.realworkfromanywhere.com) | Worldwide-only curated remote jobs (RSS) |
+| `EURemoteJobsConnector` | [EU Remote Jobs](https://euremotejobs.com) | European timezone remote jobs (RSS, `/job-listings/feed/`) |
+| `RemoteAIJobsConnector` | Real Work From Anywhere — AI category | AI/ML-specific remote jobs (RSS) |
 
 **Direct ATS connectors:**
 
