@@ -217,6 +217,81 @@ def get_pipeline_stats(session: Session) -> dict:
         return {"error": str(e)}
 
 
+def get_recent_runs(session: Session, limit: int = 10) -> dict:
+    """Return recent pipeline runs with timing, outcome, and new job counts."""
+    try:
+        runs = (
+            session.query(PipelineRun)
+            .order_by(PipelineRun.started_at.desc())
+            .limit(limit)
+            .all()
+        )
+        total_runs = session.query(func.count(PipelineRun.id)).scalar()
+        records = []
+        for r in runs:
+            duration_s = None
+            if r.started_at and r.completed_at:
+                duration_s = int((r.completed_at - r.started_at).total_seconds())
+            records.append({
+                "id": r.id,
+                "source": r.source,
+                "started_at": str(r.started_at),
+                "completed_at": str(r.completed_at) if r.completed_at else None,
+                "duration_seconds": duration_s,
+                "outcome": r.status,
+                "jobs_fetched": r.jobs_fetched,
+                "jobs_new": r.jobs_new,
+                "jobs_duplicates": r.jobs_duplicates,
+                "error": r.error_message,
+            })
+        return {"total_runs_ever": total_runs, "returned": len(records), "runs": records}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_jobs_needing_review(session: Session, limit: int = 20) -> dict:
+    """Return jobs currently in review status, ordered by fit score — the triage queue."""
+    try:
+        total = session.query(func.count(Job.id)).filter(Job.status == "review").scalar()
+        jobs = (
+            _score_order(session.query(Job).filter(Job.status == "review"))
+            .limit(limit)
+            .all()
+        )
+        return {
+            "total_awaiting_review": total,
+            "returned": len(jobs),
+            "jobs": [_job_summary(j) for j in jobs],
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_top_shortlisted_jobs(session: Session, limit: int = 10) -> dict:
+    """Return shortlisted jobs ordered by fit score — the apply queue."""
+    try:
+        total = session.query(func.count(Job.id)).filter(Job.status == "shortlisted").scalar()
+        jobs = (
+            _score_order(session.query(Job).filter(Job.status == "shortlisted"))
+            .limit(limit)
+            .all()
+        )
+        enriched = []
+        for j in jobs:
+            entry = _job_summary(j)
+            entry["llm_confidence"] = j.llm_confidence
+            entry["recommended_resume"] = j.recommended_resume
+            entry["url"] = j.url
+            enriched.append(entry)
+        return {
+            "total_shortlisted": total,
+            "returned": len(enriched),
+            "jobs": enriched,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ---------------------------------------------------------------------------
 # Registry and dispatch
 # ---------------------------------------------------------------------------
@@ -230,6 +305,9 @@ TOOL_REGISTRY: dict = {
     "get_job_description": get_job_description,
     "get_pipeline_stats": get_pipeline_stats,
     "get_schedule": get_schedule,
+    "get_recent_runs": get_recent_runs,
+    "get_jobs_needing_review": get_jobs_needing_review,
+    "get_top_shortlisted_jobs": get_top_shortlisted_jobs,
 }
 
 
@@ -358,6 +436,48 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_recent_runs",
+            "description": "Return recent pipeline run history with start time, duration, outcome, and new job counts. Use this for questions like 'what happened recently', 'did the last run succeed', or 'how many new jobs were found today'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Number of recent runs to return (default 10)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_jobs_needing_review",
+            "description": "Return jobs currently in review status ordered by fit score — the triage queue. Use this for questions like 'what should I look at next' or 'what jobs are waiting for review'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max jobs to return (default 20)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_top_shortlisted_jobs",
+            "description": "Return shortlisted jobs ordered by fit score — the apply queue. Includes URL and recommended resume. Use this for questions like 'what should I apply to next' or 'show me my shortlisted jobs'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Number of jobs to return (default 10)"},
+                },
                 "required": [],
             },
         },
