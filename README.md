@@ -1,18 +1,137 @@
 # Career Copilot
 
-An intelligent job discovery and application assistant for remote technical roles.
+Career Copilot is an AI-assisted job search automation system.
 
-It fetches jobs from multiple sources, scores them against your profile, runs a local LLM analysis to surface the best matches, and assists with application form filling — while keeping **you in control of every submission**.
+It discovers remote job listings from multiple sources, evaluates fit using deterministic rules and local LLM reasoning, and assists with application workflows through ATS detection and browser automation. The system is designed as an extensible pipeline combining data ingestion, scoring, structured reasoning, and operator control through a natural-language assistant.
 
 ---
 
-## Design Principles
+## System Architecture
 
-**Privacy First** — All LLM processing runs locally via [Ollama](https://ollama.com). No data sent to external AI services.
+```
+Job Sources
+(Remotive, Adzuna, Greenhouse, Ashby, Lever, Workable, and more)
+        ↓
+Ingestion Pipeline
+(fetch → normalize → deduplicate)
+        ↓
+SQLite Database
+(job state + pipeline history)
+        ↓
+Evaluation Engine
+(remote eligibility · skill matching · seniority · title relevance)
+        ↓
+LLM Reasoning Layer
+(Ollama — structured JSON analysis, fit scoring, skill gap detection)
+        ↓
+Shortlist / Review / Reject
+        ↓
+Operator Interface
+(CLI commands + natural language assistant with tool calling)
+        ↓
+ATS Automation
+(Playwright browser adapters — form detection, prefill, resume upload)
+```
 
-**Human in the Loop** — No application is submitted automatically. Every submission requires your explicit approval.
+---
 
-**Assistive, not blind** — The pipeline reduces mechanical work (searching, filtering, form filling) while you make the final calls.
+## Key Features
+
+- Multi-source job ingestion from 15 sources (job boards + direct ATS APIs)
+- Job deduplication and normalization across all sources
+- Remote eligibility classification with geographic pattern detection
+- Rule-based fit scoring (skill overlap, seniority, title relevance)
+- Local LLM reasoning via Ollama — structured outputs, fit explanation, skill gaps
+- Persistent job lifecycle tracking (new → review → shortlisted → applied)
+- Natural language assistant with live database access and tool calling
+- Resume recommendation engine — best resume selected per job from tagged profiles
+- ATS detection and Playwright-powered form prefill (Greenhouse, Lever, Ashby, Workable)
+- Scheduled automation via Windows Task Scheduler
+- Email digest reports after each pipeline run
+
+---
+
+## Decision Layers
+
+Each job passes through three evaluation layers:
+
+**1. Deterministic scoring**
+- Remote eligibility (geographic pattern matching, US-only rejection, region acceptance)
+- Role relevance (title keyword matching against target roles)
+- Seniority alignment (preferred and acceptable levels from profile)
+- Skill overlap (matched skills and keywords from job description)
+
+**2. LLM reasoning** (local Ollama model)
+- Semantic evaluation of job description vs. candidate profile
+- Structured JSON output: fit score, strengths, skill gaps, recommendation
+- Conservative promotion: only promotes or rejects from review, never overwrites manual decisions
+
+**3. Final classification**
+- `shortlisted` — strong fit, ready to apply
+- `review` — borderline, needs human judgment
+- `rejected` — poor fit or location mismatch
+- `applied` — submitted, tracked in history
+
+---
+
+## Natural Language Assistant
+
+> **`python run_pipeline.py ask`**
+
+Career Copilot includes a local AI assistant that operates on the live system using natural language. It uses tool calling to query the real database and pipeline history — it never guesses or makes up data.
+
+**Example interactions:**
+
+```
+You: how many shortlisted jobs do I have?
+  → count_jobs_by_status(status="shortlisted")
+Assistant: You currently have 3 shortlisted jobs.
+
+You: what should I apply to next?
+  → get_top_shortlisted_jobs(limit=5)
+Assistant: Your top shortlisted job is Sr. ML Engineer at Anthropic
+          (fit score: 87, LLM confidence: 91%). Recommended resume: gpu_systems.
+
+You: what happened in the last pipeline run?
+  → get_recent_runs(limit=1)
+Assistant: The last run completed at 12:00 today. It fetched 349 jobs,
+          33 of which were new. Outcome: success.
+
+You: when does the pipeline run automatically?
+  → get_schedule()
+Assistant: The pipeline is scheduled at 8:00 AM, 12:00 PM, 4:00 PM,
+          and 8:00 PM daily. Next run: today at 16:00.
+```
+
+Available tools:
+
+| Tool | What it answers |
+|---|---|
+| `count_jobs_by_status` | "how many shortlisted jobs do I have?" |
+| `get_jobs_by_status` | "show me my review jobs" |
+| `get_top_jobs` | "what are my best matches?" |
+| `get_top_shortlisted_jobs` | "what should I apply to next?" |
+| `get_jobs_needing_review` | "what's in my triage queue?" |
+| `search_jobs` | "do I have any jobs at Anthropic?" |
+| `get_job_detail` | "tell me more about job 42" |
+| `get_job_description` | "show me the full description for job 42" |
+| `get_pipeline_stats` | "how many jobs are in the system?" |
+| `get_recent_runs` | "did the last run succeed?" |
+| `get_schedule` | "when does the pipeline run automatically?" |
+
+---
+
+## Local AI Reasoning
+
+Career Copilot uses [Ollama](https://ollama.com) for fully local inference — no API costs, no data leaving your machine.
+
+Tested models:
+
+- `qwen2.5:7b` (default — good tool calling support)
+- `llama3.1`
+- `mistral`
+
+The LLM layer produces structured JSON outputs with defined schemas. Malformed or failed responses do not break the pipeline — the job remains in review.
 
 ---
 
@@ -55,11 +174,24 @@ full-run
                     → promotes to shortlisted or rejects with explanation
 ```
 
-Job state model:
+**Example workflows:**
 
-- **Rule layer** — `fit_score`, `rule_status`, `remote_eligibility`, `matched_skills`
-- **LLM layer** — `llm_fit_score`, `recommendation`, `llm_confidence`, `fit_explanation`
-- **Decision layer** — `status` (new → review → shortlisted / rejected / applied)
+```powershell
+# Run the full pipeline
+python run_pipeline.py full-run
+
+# Full run with email digest
+python run_pipeline.py full-run --email
+
+# Work through the review queue interactively
+python run_pipeline.py triage
+
+# Open and prefill an application form
+python run_pipeline.py open-job
+
+# Launch the natural language assistant
+python run_pipeline.py ask
+```
 
 ---
 
@@ -73,12 +205,12 @@ Run `python run_pipeline.py help` for the full reference. Key commands:
 | `full-run --email` | Same, plus email digest if new jobs found |
 | `triage` | Work through review jobs: shortlist / reject / open / skip |
 | `open-job` | Open a shortlisted job in browser with form prefill |
+| `ask` | Start the interactive LLM assistant |
 | `stats` | Job counts by status |
 | `shortlist` | List shortlisted jobs |
 | `review` | List review jobs |
 | `rescore` | Re-apply scoring rules to existing review jobs |
 | `setup-credentials` | Store email credentials in Windows Credential Manager |
-| `ask` | Start the interactive LLM assistant |
 
 ---
 
@@ -88,11 +220,27 @@ Run `python run_pipeline.py help` for the full reference. Key commands:
 
 ```powershell
 pip install -r requirements.txt
+playwright install chromium
 ```
 
 ### 2. Configure your profile
 
-Edit `profile.yaml` with your skills, target roles, seniority, location preferences, and blacklisted companies.
+Copy `profile.template.yaml` to `profile.yaml` and fill in your details:
+
+```yaml
+skills:          # matched against job titles and descriptions
+keywords:        # domain-specific terms (gpu, llm, inference, etc.)
+target_roles:    # role titles you're targeting
+seniority:       # preferred and acceptable levels
+blacklisted_companies:
+target_companies:  # curated list with careers_url — ATS auto-detected
+preferences:
+  remote_only: true
+  accepted_regions: [worldwide, emea, europe, canada, ...]
+  reject_regions: [us only]
+  contractor_ok: true
+resumes:         # multiple resumes with tags — best match selected per job
+```
 
 ### 3. Set up Ollama
 
@@ -137,29 +285,9 @@ Copy `.env.example` to `.env` and set `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` if n
 
 ### 5. (Optional) Schedule automated runs
 
-`schedule_run.bat` is pre-configured to run `full-run --email`. Register it with Windows Task Scheduler:
+`schedule_run.bat` is pre-configured to run `full-run --email`. Register it with Windows Task Scheduler.
 
 The default schedule runs at 8am, 12pm, 4pm, and 8pm daily.
-
----
-
-## Profile
-
-`profile.yaml` drives all filtering and scoring:
-
-```yaml
-skills:          # matched against job titles and descriptions
-keywords:        # domain-specific terms (gpu, llm, inference, etc.)
-target_roles:    # role titles you're targeting
-seniority:       # preferred and acceptable levels
-blacklisted_companies:
-preferences:
-  remote_only: true
-  accepted_regions: [worldwide, emea, europe, canada, ...]
-  reject_regions: [us only]
-  contractor_ok: true
-resumes:         # multiple resumes with tags — best match selected per job
-```
 
 ---
 
@@ -178,24 +306,15 @@ Bot-protected sites (remoteok.com, weworkremotely.com, jobicy.com) open in your 
 
 ---
 
-## LLM Assistant
+## Design Principles
 
-> **`python run_pipeline.py ask`**
+**Privacy First** — All LLM processing runs locally via Ollama. No job data or profile information is sent to external AI services.
 
-An interactive chat interface powered by your local Ollama model. Unlike a generic chatbot, the assistant has live access to your jobs database and system via a set of built-in tools:
+**Human in the Loop** — No application is submitted automatically. Every submission requires your explicit approval.
 
-| Tool | What it answers |
-|---|---|
-| `count_jobs_by_status` | "how many shortlisted jobs do I have?" |
-| `get_jobs_by_status` | "show me my review jobs" |
-| `get_top_jobs` | "what are my best matches?" |
-| `search_jobs` | "do I have any jobs at Anthropic?" |
-| `get_job_detail` | "tell me more about job 42" |
-| `get_job_description` | "show me the full description for job 42" |
-| `get_pipeline_stats` | "how many jobs were fetched in total?" |
-| `get_schedule` | "when does the pipeline run automatically?" |
+**Grounded assistant** — The natural language assistant uses tool calling to query real data. It never generates numbers or statuses from inference alone.
 
-The assistant calls the appropriate tool, runs the real query, and responds in natural language — it never guesses or makes up data. Conversation history is maintained within the session so you can ask follow-up questions.
+**Assistive, not blind** — The pipeline reduces mechanical work (searching, filtering, form filling) while you make the final calls.
 
 ---
 
