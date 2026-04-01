@@ -1,8 +1,8 @@
 # Career Copilot
 
-Career Copilot is an AI-assisted job search automation system.
+Career Copilot is an AI-assisted job search operator tool.
 
-It discovers remote job listings from multiple sources, evaluates fit using deterministic rules and local LLM reasoning, and assists with application workflows through ATS detection and browser automation. The system is designed as an extensible pipeline combining data ingestion, scoring, structured reasoning, and operator control through a natural-language assistant.
+It runs a continuous pipeline that ingests remote job listings from 14 sources, scores and filters them against a candidate profile, and surfaces the best matches for human review. The operator interacts with the system through a CLI control surface and a natural language assistant backed by live database access — not a chat interface bolted onto a scraper, but a workflow system with stats, triage queues, shortlists, pipeline control, and ATS-aware application automation.
 
 > **Live dataset** — 1,100+ jobs ingested · 14 active sources · 333 pipeline runs · automated deduplication across all sources
 
