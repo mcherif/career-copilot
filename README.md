@@ -101,6 +101,29 @@ Install [Ollama](https://ollama.com) and pull a model:
 ollama pull qwen2.5:7b
 ```
 
+Verify it is running:
+
+```powershell
+ollama list          # should show qwen2.5:7b in the list
+ollama run qwen2.5:7b "say hello"   # quick smoke test
+```
+
+If the model is missing or Ollama isn't responding, common fixes:
+
+| Symptom | Fix |
+|---|---|
+| `ollama: command not found` | Restart your terminal after installing Ollama |
+| `connection refused` on port 11434 | Run `ollama serve` in a separate terminal, or check the Ollama tray icon |
+| `model not found` | Run `ollama pull qwen2.5:7b` again |
+| Slow or no response | The model is loading — wait ~30 seconds on first run |
+| Want a faster/smaller model | `ollama pull qwen2.5:3b` and update `OLLAMA_MODEL` in `.env` |
+
+Once Ollama is set up, you can use the built-in assistant for any further troubleshooting:
+
+```powershell
+python run_pipeline.py ask
+```
+
 ### 4. (Optional) Configure email reports
 
 ```powershell
