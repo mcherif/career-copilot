@@ -7,18 +7,18 @@ import colorlog
 LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
 
-_ANSI_GREEN  = '\x1b[32m'
-_ANSI_PURPLE = '\x1b[35m'
+_ANSI_GREEN      = '\x1b[32m'
+_ANSI_LIGHT_BLUE = '\x1b[94m'
 
 
 class _ConnectorAwareFormatter(colorlog.ColoredFormatter):
-    """Colors connector INFO lines purple; everything else follows the normal level colors."""
+    """Colors connector INFO lines light blue; everything else follows the normal level colors."""
 
     def format(self, record: logging.LogRecord) -> str:
         result = super().format(record)
         if record.name.endswith('_connector') and record.levelno == logging.INFO:
             if result.startswith(_ANSI_GREEN):
-                result = _ANSI_PURPLE + result[len(_ANSI_GREEN):]
+                result = _ANSI_LIGHT_BLUE + result[len(_ANSI_GREEN):]
         return result
 
 

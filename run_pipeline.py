@@ -29,6 +29,9 @@ from connectors.ashby import AshbyConnector
 from connectors.greenhouse import GreenhouseConnector
 from connectors.lever import LeverConnector
 from connectors.direct_ats import DirectATSConnector
+from connectors.realworkfromanywhere import RealWorkFromAnywhereConnector
+from connectors.euremotejobs import EURemoteJobsConnector
+from connectors.remoteaijobs import RemoteAIJobsConnector
 from utils.dedup import is_duplicate
 from utils.application_filter import has_already_applied
 from utils.llm_analysis import analyze_job_with_ollama
@@ -56,6 +59,9 @@ CONNECTORS = {
     "greenhouse": GreenhouseConnector,
     "lever": LeverConnector,
     "direct_ats": DirectATSConnector,
+    "realworkfromanywhere": RealWorkFromAnywhereConnector,
+    "euremotejobs": EURemoteJobsConnector,
+    "remoteaijobs": RemoteAIJobsConnector,
 }
 
 # Job listing domains that block Playwright (bot detection / OAuth walls).

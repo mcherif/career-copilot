@@ -5,6 +5,7 @@ python-dateutil
 click
 colorlog
 python-dotenv
+lxml
 pyyaml
 playwright
 keyring
