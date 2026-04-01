@@ -991,7 +991,9 @@ def open_job(job_id, queue_status, profile, headless, fill, dry_run):
         session.close()
 
 
-_SYSTEM_PROMPT = """You are a helpful assistant embedded inside Career Copilot, a local job discovery and application pipeline.
+_SYSTEM_PROMPT = """You are an AI assistant embedded inside Career Copilot, a local job discovery and application pipeline.
+You have access to tools that let you query the live jobs database and pipeline history.
+Always use the appropriate tool to answer questions about jobs, counts, or pipeline runs — never guess or make up data.
 
 == PROJECT OVERVIEW ==
 Career Copilot fetches remote job listings from multiple sources (Remotive, RemoteOK, Adzuna, WeWorkRemotely, Himalayas, Greenhouse, Ashby, Lever, Workable, and others), scores them against a candidate profile, runs a local LLM analysis via Ollama, and assists with application form prefilling using Playwright.
@@ -1058,8 +1060,9 @@ def _read_recent_logs(n_lines: int = 60) -> str:
 @cli.command()
 @click.option('--model', default=config.OLLAMA_MODEL, show_default=True, help='Ollama model to use')
 def ask(model: str):
-    """Start an interactive troubleshooting chat powered by your local Ollama LLM."""
+    """Start an interactive assistant chat powered by your local Ollama LLM (with live DB access)."""
     import requests as _requests
+    from utils.ask_tools import TOOL_SCHEMAS, dispatch_tool
 
     # Verify Ollama is reachable before entering the loop.
     try:
@@ -1071,68 +1074,90 @@ def ask(model: str):
         ))
         return
 
+    session = SessionLocal()
     recent_logs = _read_recent_logs()
-    log_context = f"\n\n== RECENT LOG OUTPUT ==\n{recent_logs}"
-
+    log_context = f"\n\n== RECENT LOG OUTPUT (last 60 lines) ==\n{recent_logs}"
     messages = [{"role": "system", "content": _SYSTEM_PROMPT + log_context}]
 
     click.echo("")
     click.echo(click.style("  Career Copilot Assistant", fg="cyan", bold=True))
-    click.echo(click.style(f"  Model: {model}  |  Type 'exit' to quit", fg="white"))
+    click.echo(click.style(f"  Model: {model}  |  DB access: enabled  |  Type 'exit' to quit", fg="white"))
     click.echo("")
 
-    while True:
-        try:
-            click.echo(click.style("You: ", fg="green", bold=True), nl=False)
-            user_input = input()
-        except (EOFError, KeyboardInterrupt):
-            break
+    try:
+        while True:
+            try:
+                click.echo(click.style("You: ", fg="green", bold=True), nl=False)
+                user_input = input()
+            except (EOFError, KeyboardInterrupt):
+                break
 
-        if user_input.strip().lower() in ("exit", "quit", "q"):
-            break
-        if not user_input.strip():
-            continue
+            if user_input.strip().lower() in ("exit", "quit", "q"):
+                break
+            if not user_input.strip():
+                continue
 
-        messages.append({"role": "user", "content": user_input})
+            messages.append({"role": "user", "content": user_input})
 
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": True,
-        }
+            # ---- inner tool-calling loop ----------------------------------------
+            # Keep calling the LLM until it stops requesting tools and gives a
+            # final text response.
+            while True:
+                payload = {
+                    "model": model,
+                    "messages": messages,
+                    "tools": TOOL_SCHEMAS,
+                    "stream": False,
+                }
 
-        click.echo(click.style("Assistant: ", fg="cyan", bold=True), nl=False)
-        click.echo(click.style("(thinking...)", fg="yellow"), nl=False)
-        assistant_reply = []
-        first_token = True
-        try:
-            with _requests.post(config.OLLAMA_URL, json=payload, stream=True, timeout=120) as resp:
-                resp.raise_for_status()
-                for raw_line in resp.iter_lines():
-                    if not raw_line:
-                        continue
-                    try:
-                        chunk = json.loads(raw_line)
-                        token = chunk.get("message", {}).get("content", "")
-                        if token:
-                            if first_token:
-                                # Clear the "thinking..." placeholder
-                                click.echo("\r" + " " * 40 + "\r", nl=False)
-                                click.echo(click.style("Assistant: ", fg="cyan", bold=True), nl=False)
-                                first_token = False
-                            click.echo(token, nl=False)
-                            assistant_reply.append(token)
-                        if chunk.get("done"):
-                            break
-                    except json.JSONDecodeError:
-                        continue
-        except Exception as e:
-            click.echo(click.style(f"\nError contacting Ollama: {e}", fg="red"))
-            messages.pop()  # Remove the unanswered user message
-            continue
+                click.echo(click.style("Assistant: ", fg="cyan", bold=True), nl=False)
+                click.echo(click.style("(thinking...)", fg="yellow"), nl=False)
 
-        click.echo("\n")
-        messages.append({"role": "assistant", "content": "".join(assistant_reply)})
+                try:
+                    resp = _requests.post(config.OLLAMA_URL, json=payload, timeout=120)
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception as e:
+                    click.echo(click.style(f"\nError contacting Ollama: {e}", fg="red"))
+                    messages.pop()  # discard unanswered user message
+                    break
+
+                msg = data.get("message", {})
+                # Ollama requires the full assistant message in history before tool results
+                messages.append(msg)
+
+                tool_calls = msg.get("tool_calls") or []
+
+                if not tool_calls:
+                    # Final response — print it
+                    click.echo("\r" + " " * 50 + "\r", nl=False)
+                    click.echo(click.style("Assistant: ", fg="cyan", bold=True), nl=False)
+                    click.echo(msg.get("content", "").strip())
+                    click.echo("")
+                    break
+
+                # ---- execute each requested tool --------------------------------
+                click.echo("\r" + " " * 50 + "\r", nl=False)
+                for tc in tool_calls:
+                    fn_name = tc.get("function", {}).get("name", "")
+                    fn_args = tc.get("function", {}).get("arguments") or {}
+                    if isinstance(fn_args, str):
+                        try:
+                            fn_args = json.loads(fn_args)
+                        except json.JSONDecodeError:
+                            fn_args = {}
+
+                    click.echo(click.style(f"  → {fn_name}({fn_args})", fg="yellow"))
+
+                    result = dispatch_tool(fn_name, fn_args, session)
+
+                    messages.append({
+                        "role": "tool",
+                        "content": json.dumps(result, default=str, ensure_ascii=False),
+                    })
+                # loop back — LLM sees tool results and generates final response
+    finally:
+        session.close()
 
 
 if __name__ == '__main__':
