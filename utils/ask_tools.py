@@ -14,6 +14,7 @@ Pass 3 — external action tools (email): see future commits
 """
 
 import json
+import subprocess
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -148,6 +149,32 @@ def get_job_description(session: Session, job_id: int) -> dict:
         return {"error": str(e)}
 
 
+def get_schedule(session: Session) -> dict:
+    """Query Windows Task Scheduler for CareerCopilot scheduled tasks."""
+    try:
+        result = subprocess.run(
+            ["powershell", "-Command",
+             "Get-ScheduledTask | Where-Object { $_.TaskName -like 'CareerCopilot*' } | "
+             "ForEach-Object { $info = $_ | Get-ScheduledTaskInfo; "
+             "[PSCustomObject]@{ "
+             "  Name = $_.TaskName; "
+             "  State = $_.State.ToString(); "
+             "  NextRun = $info.NextRunTime.ToString('yyyy-MM-dd HH:mm'); "
+             "  LastRun = $info.LastRunTime.ToString('yyyy-MM-dd HH:mm'); "
+             "  LastResult = $info.LastTaskResult "
+             "} } | ConvertTo-Json -Compress"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return {"error": "No CareerCopilot scheduled tasks found", "detail": result.stderr.strip()}
+        raw = json.loads(result.stdout)
+        # PowerShell returns a dict (not list) when there's only one task
+        tasks = raw if isinstance(raw, list) else [raw]
+        return {"scheduled_tasks": tasks}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def get_pipeline_stats(session: Session) -> dict:
     """Return overall job counts by status and recent pipeline run history."""
     try:
@@ -191,6 +218,7 @@ TOOL_REGISTRY: dict = {
     "get_job_detail": get_job_detail,
     "get_job_description": get_job_description,
     "get_pipeline_stats": get_pipeline_stats,
+    "get_schedule": get_schedule,
 }
 
 
@@ -304,6 +332,18 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "get_pipeline_stats",
             "description": "Return overall job counts by status and recent pipeline run history. Use this for questions like 'what happened in the last run' or 'how many jobs were fetched today'.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_schedule",
+            "description": "Query Windows Task Scheduler to find out when Career Copilot is scheduled to run automatically, including next and last run times.",
             "parameters": {
                 "type": "object",
                 "properties": {},
