@@ -180,9 +180,7 @@ Bot-protected sites (remoteok.com, weworkremotely.com, jobicy.com) open in your 
 
 ## LLM Assistant
 
-```powershell
-python run_pipeline.py ask
-```
+> **`python run_pipeline.py ask`**
 
 An interactive chat interface powered by your local Ollama model. Unlike a generic chatbot, the assistant has live access to your jobs database and system via a set of built-in tools:
 
