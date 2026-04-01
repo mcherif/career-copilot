@@ -120,6 +120,16 @@ def classify_remote_eligibility(job: Dict[str, Any], profile: Dict[str, Any] | N
                 return "review"
             return "reject"
 
+    # Catch "Remote - [Country]" where the qualifier is a specific region not in
+    # accepted_regions (e.g. "Remote - India", "Remote - Brazil").
+    _rr_match = re.search(r'\bremote\s*[-–]\s*(.+)', raw_location)
+    if _rr_match:
+        qualifier = _rr_match.group(1).strip().lower()
+        _generic_qualifiers = {"worldwide", "global", "anywhere", "first", "ok", "friendly", "only"}
+        if qualifier not in _generic_qualifiers:
+            if not any(_token_in_text(r, qualifier) for r in accepted_regions):
+                return "reject"
+
     remote_only = (profile or {}).get("preferences", {}).get("remote_only", False)
     if remote_only and "hybrid" in raw_location:
         return "reject"
