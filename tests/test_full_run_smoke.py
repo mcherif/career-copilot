@@ -6,7 +6,7 @@ _run_evaluate, _run_analyze) are patched to verify call order,
 argument passing, and that failure in one stage doesn't crash the others.
 """
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from click.testing import CliRunner
 
 
@@ -39,13 +39,24 @@ def mock_profile(tmp_path):
     return str(p)
 
 
+def _mock_session():
+    """Return a MagicMock that satisfies the SessionLocal() DB calls in full_run."""
+    session = MagicMock()
+    session.query.return_value.group_by.return_value.all.return_value = []
+    session.__enter__ = MagicMock(return_value=session)
+    session.__exit__ = MagicMock(return_value=False)
+    return session
+
+
 class TestFullRunSmoke:
     def test_calls_all_three_stages_in_order(self, runner, mock_profile):
         call_order = []
+        mock_session = _mock_session()
 
         with patch("run_pipeline._run_fetch", side_effect=lambda *a, **kw: call_order.append("fetch")), \
              patch("run_pipeline._run_evaluate", side_effect=lambda *a, **kw: call_order.append("evaluate")), \
-             patch("run_pipeline._run_analyze", side_effect=lambda *a, **kw: call_order.append("analyze")):
+             patch("run_pipeline._run_analyze", side_effect=lambda *a, **kw: call_order.append("analyze")), \
+             patch("run_pipeline.SessionLocal", return_value=mock_session):
 
             from run_pipeline import cli
             runner.invoke(cli, ["full-run", "--profile", mock_profile, "--dry-run"])
@@ -54,20 +65,23 @@ class TestFullRunSmoke:
             f"Expected fetch→evaluate→analyze, got: {call_order}"
 
     def test_dry_run_flag_passed_to_fetch(self, runner, mock_profile):
+        mock_session = _mock_session()
         with patch("run_pipeline._run_fetch") as mf, \
              patch("run_pipeline._run_evaluate"), \
-             patch("run_pipeline._run_analyze"):
+             patch("run_pipeline._run_analyze"), \
+             patch("run_pipeline.SessionLocal", return_value=mock_session):
 
             from run_pipeline import cli
             runner.invoke(cli, ["full-run", "--profile", mock_profile, "--dry-run"])
             args, kwargs = mf.call_args
-            # dry_run should be True (passed as positional or keyword)
             assert True in args or kwargs.get("dry_run") is True
 
     def test_source_flag_passed_to_fetch(self, runner, mock_profile):
+        mock_session = _mock_session()
         with patch("run_pipeline._run_fetch") as mf, \
              patch("run_pipeline._run_evaluate"), \
-             patch("run_pipeline._run_analyze"):
+             patch("run_pipeline._run_analyze"), \
+             patch("run_pipeline.SessionLocal", return_value=mock_session):
 
             from run_pipeline import cli
             runner.invoke(cli, ["full-run", "--profile", mock_profile, "--source", "remotive", "--dry-run"])
@@ -75,17 +89,20 @@ class TestFullRunSmoke:
             assert "remotive" in args or kwargs.get("source") == "remotive"
 
     def test_fetch_failure_does_not_crash_pipeline(self, runner, mock_profile):
+        mock_session = _mock_session()
         with patch("run_pipeline._run_fetch", side_effect=Exception("network error")), \
              patch("run_pipeline._run_evaluate"), \
-             patch("run_pipeline._run_analyze"):
+             patch("run_pipeline._run_analyze"), \
+             patch("run_pipeline.SessionLocal", return_value=mock_session):
 
             from run_pipeline import cli
             result = runner.invoke(cli, ["full-run", "--profile", mock_profile, "--dry-run"])
-            # Pipeline should not propagate the exception as an unhandled crash
-            assert result.exit_code in (0, 1)  # may log error but shouldn't traceback
+            assert result.exit_code in (0, 1)
 
     def test_invalid_profile_exits_gracefully(self, runner, tmp_path):
+        mock_session = _mock_session()
         bad_profile = str(tmp_path / "missing.yaml")
-        from run_pipeline import cli
-        result = runner.invoke(cli, ["full-run", "--profile", bad_profile, "--dry-run"])
-        assert result.exit_code in (0, 1)  # no unhandled exception
+        with patch("run_pipeline.SessionLocal", return_value=mock_session):
+            from run_pipeline import cli
+            result = runner.invoke(cli, ["full-run", "--profile", bad_profile, "--dry-run"])
+        assert result.exit_code in (0, 1)
