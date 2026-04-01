@@ -20,30 +20,7 @@ The goal is not to automate applying. It is to eliminate the mechanical work tha
 
 ## System Architecture
 
-```
-Job Sources
-(Remotive, Adzuna, Greenhouse, Ashby, Lever, Workable, and more)
-        ↓
-Ingestion Pipeline
-(fetch → normalize → deduplicate)
-        ↓
-SQLite Database
-(job state + pipeline history)
-        ↓
-Evaluation Engine
-(remote eligibility · skill matching · seniority · title relevance)
-        ↓
-LLM Reasoning Layer
-(Ollama — structured JSON analysis, fit scoring, skill gap detection)
-        ↓
-Shortlist / Review / Reject
-        ↓
-Operator Interface
-(CLI commands + natural language assistant with tool calling)
-        ↓
-ATS Automation
-(Playwright browser adapters — form detection, prefill, resume upload)
-```
+![Career Copilot System Overview](docs/career-copilot-system-overview.png)
 
 ---
 
