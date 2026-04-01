@@ -1083,8 +1083,9 @@ def ask(model: str):
 
     while True:
         try:
-            user_input = click.prompt(click.style("You", fg="green", bold=True))
-        except (click.exceptions.Abort, EOFError):
+            click.echo(click.style("You: ", fg="green", bold=True), nl=False)
+            user_input = input()
+        except (EOFError, KeyboardInterrupt):
             break
 
         if user_input.strip().lower() in ("exit", "quit", "q"):
@@ -1100,8 +1101,10 @@ def ask(model: str):
             "stream": True,
         }
 
-        click.echo(click.style("\nAssistant: ", fg="cyan", bold=True), nl=False)
+        click.echo(click.style("Assistant: ", fg="cyan", bold=True), nl=False)
+        click.echo(click.style("(thinking...)", fg="yellow"), nl=False)
         assistant_reply = []
+        first_token = True
         try:
             with _requests.post(config.OLLAMA_URL, json=payload, stream=True, timeout=120) as resp:
                 resp.raise_for_status()
@@ -1112,6 +1115,11 @@ def ask(model: str):
                         chunk = json.loads(raw_line)
                         token = chunk.get("message", {}).get("content", "")
                         if token:
+                            if first_token:
+                                # Clear the "thinking..." placeholder
+                                click.echo("\r" + " " * 40 + "\r", nl=False)
+                                click.echo(click.style("Assistant: ", fg="cyan", bold=True), nl=False)
+                                first_token = False
                             click.echo(token, nl=False)
                             assistant_reply.append(token)
                         if chunk.get("done"):
