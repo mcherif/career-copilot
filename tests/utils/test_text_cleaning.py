@@ -4,7 +4,6 @@ Tests for utils/text_cleaning.py
 clean_description() is called on every job before scoring and LLM analysis,
 so regressions here silently corrupt the entire pipeline.
 """
-import pytest
 from utils.text_cleaning import strip_html, normalize_whitespace, clean_description
 
 

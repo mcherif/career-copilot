@@ -5,6 +5,11 @@ day1_implementation_spec.md
 # Secrets
 .env
 
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
+
 # Python
 __pycache__/
 *.pyc

@@ -7,11 +7,10 @@ Custom career domains are skipped with a warning.
 
 This avoids hardcoding company→ATS mappings that go stale when companies migrate.
 """
-import re
 import traceback
 import yaml
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from urllib.parse import urlparse
 
 import requests

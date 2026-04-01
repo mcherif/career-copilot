@@ -13,7 +13,7 @@ import datetime
 import json
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from models.database import Base, Job, PipelineRun, ApplicationHistory
+from models.database import Job, PipelineRun, ApplicationHistory
 from connectors.remotive import RemotiveConnector
 from connectors.remoteok import RemoteOKConnector
 from connectors.weworkremotely import WeWorkRemotelyConnector
@@ -287,7 +287,7 @@ def _run_analyze(profile: str, model: str, target_status: str, limit: int, dry_r
     try:
         jobs_to_analyze = (
             session.query(Job)
-            .filter(Job.status == target_status, Job.llm_status == None)
+            .filter(Job.status == target_status, Job.llm_status.is_(None))
             .order_by(Job.fit_score.desc(), Job.id.asc())
             .limit(limit)
             .all()
@@ -426,7 +426,7 @@ def triage():
                 .filter(
                     Job.status == 'review',
                     Job.id.notin_(seen_ids),
-                    (Job.posted_date >= cutoff) | (Job.posted_date == None),
+                    (Job.posted_date >= cutoff) | (Job.posted_date.is_(None)),
                 )
                 .order_by(Job.fit_score.desc(), Job.id.asc())
                 .first()
@@ -601,7 +601,7 @@ def full_run(source: str, profile: str, model: str, analyze_status: str, analyze
                                   "source": j.source} for j in jobs]
                 if new_review > 0:
                     jobs = (session.query(Job)
-                            .filter(Job.status == "review", Job.llm_status == None)
+                            .filter(Job.status == "review", Job.llm_status.is_(None))
                             .order_by(Job.id.desc())
                             .limit(new_review).all())
                     new_jobs += [{"title": j.title, "company": j.company,

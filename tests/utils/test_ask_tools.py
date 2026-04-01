@@ -5,15 +5,11 @@ Policy/transition tests live in test_tool_policy.py.
 This file covers: dispatch_tool(), read-only tool return shapes,
 mark_job_status execution, and open_job / run_full_pipeline execution.
 """
-import json
-import pytest
-from unittest.mock import patch, MagicMock
 from models.database import Job
 from utils.ask_tools import dispatch_tool, mark_job_status, ACTION_TOOLS
 
 
 def _seed_jobs(db_session, n=3, status="review"):
-    jobs = []
     for i in range(n):
         job = Job(
             external_id=f"seed-{i}",
@@ -195,7 +191,9 @@ class TestMarkJobStatusExecution:
         job = Job(external_id="t-rs", source="test", company="X", title="Y",
                   location="Remote", raw_location_text="Remote",
                   url="https://x.com/rs", status="review")
-        db_session.add(job); db_session.commit(); db_session.refresh(job)
+        db_session.add(job)
+        db_session.commit()
+        db_session.refresh(job)
         mark_job_status(db_session, job.id, "shortlisted")
         db_session.refresh(job)
         assert job.status == "shortlisted"
@@ -204,7 +202,9 @@ class TestMarkJobStatusExecution:
         job = Job(external_id="t-sr", source="test", company="X", title="Y",
                   location="Remote", raw_location_text="Remote",
                   url="https://x.com/sr", status="shortlisted")
-        db_session.add(job); db_session.commit(); db_session.refresh(job)
+        db_session.add(job)
+        db_session.commit()
+        db_session.refresh(job)
         mark_job_status(db_session, job.id, "rejected")
         db_session.refresh(job)
         assert job.status == "rejected"
@@ -215,7 +215,9 @@ class TestMarkJobStatusExecution:
         job = Job(external_id="t-ra", source="test", company="X", title="Y",
                   location="Remote", raw_location_text="Remote",
                   url="https://x.com/ra", status="review")
-        db_session.add(job); db_session.commit(); db_session.refresh(job)
+        db_session.add(job)
+        db_session.commit()
+        db_session.refresh(job)
         result = mark_job_status(db_session, job.id, "applied")
         assert result["success"] is True  # function succeeds; policy layer is separate
 

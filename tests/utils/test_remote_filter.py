@@ -4,7 +4,6 @@ Tests for utils/remote_filter.py — classify_remote_eligibility()
 This is the highest-risk logic layer: wrong rejections lose real jobs,
 wrong accepts waste LLM quota on ineligible jobs.
 """
-import pytest
 from utils.remote_filter import classify_remote_eligibility
 
 

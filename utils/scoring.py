@@ -212,7 +212,7 @@ def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
         "german": ["kenntnisse", "erfahrung", "anforderungen", "berufserfahrung",
                    "kenntnisse", "wir suchen", "stellenbeschreibung", "aufgaben"],
     }
-    profile_langs = {str(l).lower() for l in (profile or {}).get("languages", ["english"])}
+    profile_langs = {str(lang).lower() for lang in (profile or {}).get("languages", ["english"])}
     desc_lower = str(job.get("description_text") or job.get("description") or "").lower()
     for lang, markers in _LANG_MARKERS.items():
         if lang not in profile_langs and sum(1 for m in markers if m in desc_lower) >= 3:

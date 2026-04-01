@@ -1,7 +1,6 @@
 """
 Tests for utils/dedup.py — is_duplicate() and generate_job_hash()
 """
-import pytest
 from models.database import Job
 from utils.dedup import is_duplicate, generate_job_hash
 

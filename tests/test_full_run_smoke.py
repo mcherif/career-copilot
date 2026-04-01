@@ -6,7 +6,7 @@ _run_evaluate, _run_analyze) are patched to verify call order,
 argument passing, and that failure in one stage doesn't crash the others.
 """
 import pytest
-from unittest.mock import patch, call, MagicMock
+from unittest.mock import patch
 from click.testing import CliRunner
 
 
@@ -43,12 +43,12 @@ class TestFullRunSmoke:
     def test_calls_all_three_stages_in_order(self, runner, mock_profile):
         call_order = []
 
-        with patch("run_pipeline._run_fetch", side_effect=lambda *a, **kw: call_order.append("fetch")) as mf, \
-             patch("run_pipeline._run_evaluate", side_effect=lambda *a, **kw: call_order.append("evaluate")) as me, \
-             patch("run_pipeline._run_analyze", side_effect=lambda *a, **kw: call_order.append("analyze")) as ma:
+        with patch("run_pipeline._run_fetch", side_effect=lambda *a, **kw: call_order.append("fetch")), \
+             patch("run_pipeline._run_evaluate", side_effect=lambda *a, **kw: call_order.append("evaluate")), \
+             patch("run_pipeline._run_analyze", side_effect=lambda *a, **kw: call_order.append("analyze")):
 
             from run_pipeline import cli
-            result = runner.invoke(cli, ["full-run", "--profile", mock_profile, "--dry-run"])
+            runner.invoke(cli, ["full-run", "--profile", mock_profile, "--dry-run"])
 
         assert call_order == ["fetch", "evaluate", "analyze"], \
             f"Expected fetch→evaluate→analyze, got: {call_order}"
@@ -76,8 +76,8 @@ class TestFullRunSmoke:
 
     def test_fetch_failure_does_not_crash_pipeline(self, runner, mock_profile):
         with patch("run_pipeline._run_fetch", side_effect=Exception("network error")), \
-             patch("run_pipeline._run_evaluate") as me, \
-             patch("run_pipeline._run_analyze") as ma:
+             patch("run_pipeline._run_evaluate"), \
+             patch("run_pipeline._run_analyze"):
 
             from run_pipeline import cli
             result = runner.invoke(cli, ["full-run", "--profile", mock_profile, "--dry-run"])

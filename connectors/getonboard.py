@@ -28,8 +28,8 @@ def _load_allowed_lang_codes() -> set:
     try:
         with open("profile.yaml", encoding="utf-8") as f:
             profile = yaml.safe_load(f)
-        langs = [str(l).lower() for l in (profile or {}).get("languages", [])]
-        codes = {_LANG_CODE_MAP[l] for l in langs if l in _LANG_CODE_MAP}
+        langs = [str(lang).lower() for lang in (profile or {}).get("languages", [])]
+        codes = {_LANG_CODE_MAP[lang] for lang in langs if lang in _LANG_CODE_MAP}
         return codes or {"en"}  # default to English-only if not configured
     except Exception:
         return {"en"}

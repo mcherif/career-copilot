@@ -4,8 +4,6 @@ Tests for the Pass 2 policy layer in utils/ask_tools.py:
   - confirmation_prompt()
   - mark_job_status transition rules
 """
-import pytest
-from unittest.mock import patch
 from models.database import Job
 from utils.ask_tools import tool_policy_check, confirmation_prompt, _VALID_TRANSITIONS
 

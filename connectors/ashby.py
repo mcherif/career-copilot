@@ -1,7 +1,7 @@
 import re
 import traceback
 import yaml
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Dict, Any, Set
 
 import requests

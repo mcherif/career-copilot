@@ -4,7 +4,6 @@ Tests for utils/scoring.py — score_job()
 Covers: hard rejects, score thresholds, skill/keyword matching,
 seniority alignment, and recommended_status assignment.
 """
-import pytest
 from utils.scoring import score_job
 
 

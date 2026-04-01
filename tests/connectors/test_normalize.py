@@ -5,7 +5,6 @@ No HTTP calls — raw job dicts are passed directly to normalize().
 These tests catch regressions when connectors are modified: a missing
 key here means the ingestion pipeline will silently drop that field.
 """
-import pytest
 from datetime import datetime, timezone
 
 # Required keys every normalized job must have

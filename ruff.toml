@@ -1,0 +1,11 @@
+[lint]
+select = ["E", "F"]
+ignore = ["E501"]   # line-length enforcement left to formatter, not linter
+exclude = [
+    "_defer_workingnomads.py",
+    "_purge_disabled.py",
+    "playground_playwright.py",
+]
+
+[lint.per-file-ignores]
+"alembic/env.py" = ["E402"]
