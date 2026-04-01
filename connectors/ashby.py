@@ -113,6 +113,8 @@ class AshbyConnector(BaseConnector):
         jobs = response.json().get("jobs", [])
         results = []
         for job in jobs:
+            if job.get("workplaceType", "").lower() not in ("remote", ""):
+                continue
             if not job.get("isRemote"):
                 continue
             title = job.get("title", "")
@@ -159,7 +161,7 @@ class AshbyConnector(BaseConnector):
             "url": url,
             "ats_type": detect_ats(url),
             "posted_date": posted_date,
-            "remote_eligibility": "accept",  # isRemote=True guarantees this
+            "remote_eligibility": "accept",  # workplaceType=Remote + isRemote guarantees this
         }
 
     def get_source_name(self) -> str:

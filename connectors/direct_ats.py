@@ -90,6 +90,8 @@ def _fetch_ashby(slug: str, company_name: str, target_roles: List[str]) -> List[
     jobs = r.json().get("jobs", [])
     results = []
     for job in jobs:
+        if job.get("workplaceType", "").lower() not in ("remote", ""):
+            continue
         if not job.get("isRemote"):
             continue
         if not _title_is_relevant(job.get("title", ""), target_roles):
