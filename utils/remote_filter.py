@@ -156,6 +156,13 @@ def classify_remote_eligibility(job: Dict[str, Any], profile: Dict[str, Any] | N
             return "review"
         return "accept"
 
+    # If the raw location is purely specific geographic places (no remote/worldwide
+    # hint) and none match accepted regions, this is an office/region-restricted job.
+    # e.g. "South Africa; India", "São Paulo", "Seoul"
+    _BROAD_LOCATION_TERMS = {"remote", "worldwide", "global", "anywhere"}
+    if raw_location and not any(term in raw_location for term in _BROAD_LOCATION_TERMS):
+        return "reject"
+
     if _phrase_in_text(REVIEW_KEYWORDS, combined_text) or raw_location:
         return "review"
 
