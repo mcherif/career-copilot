@@ -8,6 +8,16 @@ It runs a continuous pipeline that ingests remote job listings from 14 sources, 
 
 ---
 
+## Why This Project Exists
+
+Job searching at scale means manually scanning hundreds of postings across dozens of sites, filtering roles that are geographically restricted or off-target, and tracking applications before they go cold.
+
+Career Copilot explores how much of this workflow can be automated through a combination of data pipelines, deterministic evaluation, and local LLM reasoning — while keeping the operator in control of every decision that matters.
+
+The goal is not to automate applying. It is to eliminate the mechanical work that precedes it: discovery, filtering, scoring, and triage. By the time a job reaches the shortlist, it has already passed geographic eligibility checks, rule-based fit scoring, and semantic LLM evaluation. The operator's attention is reserved for jobs that have earned it.
+
+---
+
 ## System Architecture
 
 ```
