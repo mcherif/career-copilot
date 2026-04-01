@@ -4,6 +4,8 @@ Career Copilot is an AI-assisted job search automation system.
 
 It discovers remote job listings from multiple sources, evaluates fit using deterministic rules and local LLM reasoning, and assists with application workflows through ATS detection and browser automation. The system is designed as an extensible pipeline combining data ingestion, scoring, structured reasoning, and operator control through a natural-language assistant.
 
+> **Live dataset** — 1,100+ jobs ingested · 14 active sources · 333 pipeline runs · automated deduplication across all sources
+
 ---
 
 ## System Architecture
