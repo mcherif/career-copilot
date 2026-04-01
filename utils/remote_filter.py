@@ -47,7 +47,7 @@ US_ONLY_LOCATIONS = {
 
 # Substrings that, when found in raw_location, indicate US restriction
 # unless a broader region (worldwide, emea, etc.) is also present.
-_US_LOCATION_SUBSTRINGS = ("united states", " usa", "u.s.a")
+_US_LOCATION_SUBSTRINGS = ("united states", " usa", "u.s.a", "(u.s.", "(u.s)", "(us)", "(us ")
 _BROAD_REGION_OVERRIDES = ("worldwide", "global", "emea", "europe", "anywhere", "international")
 
 MIXED_REGION_HINTS = [
@@ -109,9 +109,15 @@ def classify_remote_eligibility(job: Dict[str, Any], profile: Dict[str, Any] | N
     if raw_location in US_ONLY_LOCATIONS:
         return "reject"
 
-    # Catch "Remote - United States", "Remote, USA", etc.
+    # Catch "Remote - United States", "Remote (U.S.)", "Remote (US)", etc.
     if any(us in raw_location for us in _US_LOCATION_SUBSTRINGS):
         if not any(broad in raw_location for broad in _BROAD_REGION_OVERRIDES):
+            # If an accepted profile region also appears (e.g. "Remote (US or Canada)"),
+            # downgrade to review rather than hard reject.
+            _generic = {"worldwide", "global", "anywhere", "remote anywhere"}
+            profile_specific = [r for r in accepted_regions if r not in _generic]
+            if any(r in raw_location for r in profile_specific):
+                return "review"
             return "reject"
 
     remote_only = (profile or {}).get("preferences", {}).get("remote_only", False)
