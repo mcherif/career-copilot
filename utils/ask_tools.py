@@ -62,12 +62,18 @@ def count_jobs_by_status(session: Session, status: str) -> dict:
 def get_jobs_by_status(session: Session, status: str, limit: int = 20) -> dict:
     """Return jobs filtered by status, ordered by fit score."""
     try:
+        total = session.query(func.count(Job.id)).filter(Job.status == status).scalar()
         jobs = (
             _score_order(session.query(Job).filter(Job.status == status))
             .limit(limit)
             .all()
         )
-        return {"status": status, "count": len(jobs), "jobs": [_job_summary(j) for j in jobs]}
+        return {
+            "status": status,
+            "total_in_db": total,
+            "returned": len(jobs),
+            "jobs": [_job_summary(j) for j in jobs],
+        }
     except Exception as e:
         return {"error": str(e)}
 
@@ -80,8 +86,9 @@ def get_top_jobs(session: Session, limit: int = 5, status: str = None) -> dict:
             q = q.filter(Job.status == status)
         else:
             q = q.filter(Job.status.in_(["shortlisted", "review"]))
+        total = q.with_entities(func.count(Job.id)).scalar()
         jobs = _score_order(q).limit(limit).all()
-        return {"count": len(jobs), "jobs": [_job_summary(j) for j in jobs]}
+        return {"total_matching": total, "returned": len(jobs), "jobs": [_job_summary(j) for j in jobs]}
     except Exception as e:
         return {"error": str(e)}
 
@@ -90,16 +97,10 @@ def search_jobs(session: Session, query: str) -> dict:
     """Search jobs by keyword against title or company name."""
     try:
         like = f"%{query}%"
-        jobs = (
-            _score_order(
-                session.query(Job).filter(
-                    Job.title.ilike(like) | Job.company.ilike(like)
-                )
-            )
-            .limit(20)
-            .all()
-        )
-        return {"query": query, "count": len(jobs), "jobs": [_job_summary(j) for j in jobs]}
+        q = session.query(Job).filter(Job.title.ilike(like) | Job.company.ilike(like))
+        total = q.with_entities(func.count(Job.id)).scalar()
+        jobs = _score_order(q).limit(20).all()
+        return {"query": query, "total_matching": total, "returned": len(jobs), "jobs": [_job_summary(j) for j in jobs]}
     except Exception as e:
         return {"error": str(e)}
 
