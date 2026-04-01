@@ -152,24 +152,34 @@ def get_job_description(session: Session, job_id: int) -> dict:
 
 def get_schedule(session: Session) -> dict:
     """Query Windows Task Scheduler for CareerCopilot scheduled tasks."""
+    # LastTaskResult codes: 0 = success, 1 = incorrect function, 267011 = task has not run yet
+    _RESULT_LABELS = {0: "success", 267011: "never run", 1: "failed"}
+
     try:
+        ps = (
+            "Get-ScheduledTask | Where-Object { $_.TaskName -like 'CareerCopilot*' } | "
+            "ForEach-Object { "
+            "  $task = $_; "
+            "  $info = $task | Get-ScheduledTaskInfo; "
+            "  $triggers = $task.Triggers | ForEach-Object { $_.StartBoundary }; "
+            "  [PSCustomObject]@{ "
+            "    task_name            = $task.TaskName; "
+            "    task_state           = $task.State.ToString(); "
+            "    configured_times     = ($triggers | Sort-Object | ForEach-Object { if ($_) { ([datetime]$_).ToString('HH:mm') } }); "
+            "    next_scheduled_run   = if ($info.NextRunTime.Year -gt 2000) { $info.NextRunTime.ToString('yyyy-MM-dd HH:mm') } else { $null }; "
+            "    last_attempted_run   = if ($info.LastRunTime.Year -gt 2000) { $info.LastRunTime.ToString('yyyy-MM-dd HH:mm') } else { $null }; "
+            "    last_run_result_code = $info.LastTaskResult; "
+            "    last_run_result      = if ($info.LastTaskResult -eq 0) { 'success' } elseif ($info.LastTaskResult -eq 267011) { 'never run' } else { 'failed (code ' + $info.LastTaskResult + ')' } "
+            "  } "
+            "} | ConvertTo-Json -Compress"
+        )
         result = subprocess.run(
-            ["powershell", "-Command",
-             "Get-ScheduledTask | Where-Object { $_.TaskName -like 'CareerCopilot*' } | "
-             "ForEach-Object { $info = $_ | Get-ScheduledTaskInfo; "
-             "[PSCustomObject]@{ "
-             "  Name = $_.TaskName; "
-             "  State = $_.State.ToString(); "
-             "  NextRun = $info.NextRunTime.ToString('yyyy-MM-dd HH:mm'); "
-             "  LastRun = $info.LastRunTime.ToString('yyyy-MM-dd HH:mm'); "
-             "  LastResult = $info.LastTaskResult "
-             "} } | ConvertTo-Json -Compress"],
+            ["powershell", "-Command", ps],
             capture_output=True, text=True, timeout=10
         )
         if result.returncode != 0 or not result.stdout.strip():
             return {"error": "No CareerCopilot scheduled tasks found", "detail": result.stderr.strip()}
         raw = json.loads(result.stdout)
-        # PowerShell returns a dict (not list) when there's only one task
         tasks = raw if isinstance(raw, list) else [raw]
         return {"scheduled_tasks": tasks}
     except Exception as e:
