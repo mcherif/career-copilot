@@ -325,6 +325,12 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
     </button>
   </div>
 
+  <div id="emptyState" class="empty-state" style="display:none">
+    <div class="empty-state-icon">✓</div>
+    <div class="empty-state-title" id="emptyTitle">No jobs</div>
+    <div class="empty-state-sub">All caught up! Run the pipeline to fetch new jobs.</div>
+  </div>
+
   <div class="job-card-wrap" id="cardWrap">
     <div class="ghost-card ghost-card-2"></div>
     <div class="ghost-card ghost-card-1"></div>
@@ -449,6 +455,7 @@ async function loadJobs(status) {
     jobs = data.jobs || [];
     idx = 0;
     if (jobs.length > 0) {
+      renderCardWrap();
       renderCard(idx);
     } else {
       renderEmpty(status);
@@ -565,13 +572,15 @@ function renderCard(i, direction) {
 }
 
 function renderEmpty(status) {
-  document.getElementById('cardWrap').innerHTML = `
-    <div class="empty-state">
-      <div class="empty-state-icon">✓</div>
-      <div class="empty-state-title">No ${status} jobs</div>
-      <div class="empty-state-sub">All caught up! Run the pipeline to fetch new jobs.</div>
-    </div>`;
+  document.getElementById('cardWrap').style.display = 'none';
+  document.getElementById('emptyTitle').textContent = `No ${status} jobs`;
+  document.getElementById('emptyState').style.display = 'flex';
   document.getElementById('navCounter').textContent = `0 ${status} jobs`;
+}
+
+function renderCardWrap() {
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('cardWrap').style.display = '';
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────
@@ -599,6 +608,7 @@ async function triageAction(newStatus) {
     showToast(icons[newStatus] || newStatus, newStatus === 'shortlisted' || newStatus === 'applied' ? 'success' : '');
     jobs.splice(idx, 1);
     if (jobs.length === 0) { renderEmpty(currentStatus); loadStats(); return; }
+    renderCardWrap();
     if (idx >= jobs.length) idx = jobs.length - 1;
     renderCard(idx);
     loadStats();
