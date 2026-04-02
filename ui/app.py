@@ -176,7 +176,7 @@ def _parse_json_list(raw) -> List[str]:
 
 
 def _job_to_dict(job: Job) -> Dict[str, Any]:
-    score = job.llm_fit_score or job.fit_score
+    score = job.llm_fit_score if job.llm_fit_score is not None else job.fit_score
     return {
         "id": job.id,
         "title": job.title or "",
