@@ -1294,10 +1294,20 @@ def cover_letter_cmd(job_id: int, profile: str, model: str, regenerate: bool):
 @click.option('--no-browser', is_flag=True, help='Do not open browser automatically')
 def ui_cmd(port: int, no_browser: bool):
     """Launch the Career Copilot web UI."""
+    import socket
     import webbrowser
     import uvicorn
 
     url = f"http://localhost:{port}"
+
+    # If port is already bound, assume another instance is running — just open the browser.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _s:
+        if _s.connect_ex(("127.0.0.1", port)) == 0:
+            click.echo(f"UI already running at {url} — opening browser.")
+            if not no_browser:
+                webbrowser.open(url)
+            return
+
     if not no_browser:
         webbrowser.open(url)
     click.echo(f"Starting Career Copilot UI at {url}")

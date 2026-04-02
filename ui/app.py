@@ -12,6 +12,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -132,6 +135,84 @@ def _update_steps_from_log(line: str):
         steps["fetch"]["status"] = "done"
         steps["evaluate"]["status"] = "done"
         steps["analyze"]["status"] = "done"
+
+
+# ---------------------------------------------------------------------------
+# Schedule
+# ---------------------------------------------------------------------------
+
+_SCHEDULE_PATH = Path(__file__).parent.parent / "ui_schedule.json"
+_DEFAULT_SCHEDULE: Dict[str, Any] = {"mode": "off", "interval_hours": 4, "times": []}
+_sched_config: Dict[str, Any] = dict(_DEFAULT_SCHEDULE)
+_scheduler = BackgroundScheduler(timezone="UTC")
+
+
+def _load_sched_config() -> None:
+    global _sched_config
+    if _SCHEDULE_PATH.exists():
+        try:
+            _sched_config = json.loads(_SCHEDULE_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+
+def _save_sched_config() -> None:
+    _SCHEDULE_PATH.write_text(json.dumps(_sched_config, indent=2), encoding="utf-8")
+
+
+def _scheduled_run() -> None:
+    with _pipeline_lock:
+        if _pipeline["status"] == "running":
+            return
+    threading.Thread(target=_run_pipeline_subprocess, daemon=True).start()
+
+
+def _apply_schedule() -> None:
+    _scheduler.remove_all_jobs()
+    mode = _sched_config.get("mode", "off")
+    if mode == "interval":
+        hours = max(1, int(_sched_config.get("interval_hours", 4)))
+        _scheduler.add_job(_scheduled_run, IntervalTrigger(hours=hours), id="pi")
+    elif mode == "daily":
+        for i, t in enumerate(_sched_config.get("times", [])):
+            try:
+                h, m = t.strip().split(":")
+                _scheduler.add_job(_scheduled_run, CronTrigger(hour=int(h), minute=int(m)), id=f"pd_{i}")
+            except Exception:
+                pass
+
+
+def _next_run_iso() -> str:
+    runs = [j.next_run_time for j in _scheduler.get_jobs() if j.next_run_time]
+    return min(runs).isoformat() if runs else ""
+
+
+def _read_task_scheduler() -> Dict[str, Any]:
+    try:
+        result = subprocess.run(
+            ["schtasks", "/query", "/fo", "CSV", "/v"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines():
+            if "run_pipeline" in line.lower():
+                name = line.split('","')[0].strip('"').strip(",\"")
+                return {"found": True, "name": name}
+    except Exception:
+        pass
+    return {"found": False, "name": ""}
+
+
+@app.on_event("startup")
+def _on_startup() -> None:
+    _load_sched_config()
+    _apply_schedule()
+    _scheduler.start()
+
+
+@app.on_event("shutdown")
+def _on_shutdown() -> None:
+    if _scheduler.running:
+        _scheduler.shutdown(wait=False)
 
 
 # ---------------------------------------------------------------------------
@@ -334,3 +415,33 @@ async def pipeline_run():
     thread = threading.Thread(target=_run_pipeline_subprocess, daemon=True)
     thread.start()
     return {"ok": True, "message": "Pipeline started"}
+
+
+# ---------------------------------------------------------------------------
+# Routes — schedule
+# ---------------------------------------------------------------------------
+
+class ScheduleConfig(BaseModel):
+    mode: str
+    interval_hours: int = 4
+    times: List[str] = []
+
+
+@app.get("/api/schedule")
+async def get_schedule():
+    return {
+        **_sched_config,
+        "next_run": _next_run_iso(),
+        "task_scheduler": _read_task_scheduler(),
+    }
+
+
+@app.post("/api/schedule")
+async def set_schedule(body: ScheduleConfig):
+    global _sched_config
+    if body.mode not in {"off", "interval", "daily"}:
+        raise HTTPException(400, f"Invalid mode: {body.mode}")
+    _sched_config = {"mode": body.mode, "interval_hours": body.interval_hours, "times": body.times}
+    _apply_schedule()
+    _save_sched_config()
+    return {"ok": True, "next_run": _next_run_iso(), **_sched_config}

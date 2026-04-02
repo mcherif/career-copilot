@@ -152,6 +152,14 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
 .btn-open-apply{display:flex;align-items:center;gap:7px;padding:12px 20px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s ease;box-shadow:0 2px 8px rgba(59,130,246,.3);white-space:nowrap;flex-shrink:0;}
 .btn-open-apply:hover{background:#2563eb;box-shadow:0 4px 16px rgba(59,130,246,.4);transform:translateY(-1px);}
 .btn-open-apply svg{width:14px;height:14px;}
+.apply-confirm{display:none;align-items:center;gap:10px;padding:11px 20px;background:var(--accent-light);border-top:1px solid var(--accent-mid);animation:fadeSlideUp .2s ease;}
+.apply-confirm.show{display:flex;}
+.apply-confirm-text{flex:1;font-size:13px;font-weight:600;color:var(--text-primary);}
+.btn-applied-yes{padding:7px 14px;background:var(--green);color:#fff;border:none;border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;transition:opacity var(--transition);}
+.btn-applied-yes:hover{opacity:.85;}
+.btn-applied-no{padding:7px 12px;background:transparent;color:var(--text-muted);border:1px solid var(--border);border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:12.5px;font-weight:500;cursor:pointer;transition:all var(--transition);}
+.btn-applied-no:hover{color:var(--text-secondary);border-color:var(--text-muted);}
+@keyframes fadeSlideUp{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
 .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 40px;text-align:center;gap:12px;}
 .empty-state-icon{font-size:48px;opacity:.3;}
 .empty-state-title{font-size:18px;font-weight:700;color:var(--text-secondary);}
@@ -165,6 +173,26 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
 .toast.error{background:var(--red);}
 @keyframes spin{to{transform:rotate(360deg);}}
 .spin{animation:spin 1s linear infinite;display:inline-block;}
+.schedule-wrap{border-top:1px solid var(--border-subtle);padding-top:14px;margin-top:8px;display:flex;flex-direction:column;gap:4px;}
+.schedule-row{display:flex;align-items:center;gap:8px;}
+.schedule-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);}
+.schedule-summary{flex:1;font-size:12px;color:var(--text-secondary);text-align:right;}
+.schedule-next{font-size:11px;color:var(--text-muted);text-align:right;}
+.btn-icon-sm{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all var(--transition);flex-shrink:0;}
+.btn-icon-sm:hover{background:var(--bg-hover);color:var(--text-primary);}
+.schedule-edit{display:flex;flex-direction:column;gap:8px;margin-top:8px;padding-top:10px;border-top:1px solid var(--border-subtle);}
+.schedule-mode-tabs{display:flex;gap:4px;}
+.smode-btn{flex:1;padding:5px 0;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-secondary);font-family:'Inter',sans-serif;font-size:11.5px;font-weight:500;cursor:pointer;transition:all var(--transition);}
+.smode-btn.active{background:var(--accent-light);color:var(--accent);border-color:var(--accent-mid);}
+.schedule-input-row{display:flex;align-items:center;gap:6px;}
+.schedule-hint{font-size:11px;color:var(--text-muted);}
+.schedule-input{width:52px;padding:5px 8px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-family:'Inter',sans-serif;font-size:12px;text-align:center;outline:none;}
+.schedule-input:focus{border-color:var(--accent);}
+.schedule-input-wide{width:100%;padding:5px 8px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-family:'Inter',sans-serif;font-size:12px;outline:none;}
+.schedule-input-wide:focus{border-color:var(--accent);}
+.schedule-sys{font-size:11px;color:var(--text-muted);padding:5px 8px;background:var(--bg-subtle);border-radius:6px;border-left:2px solid var(--border);}
+.btn-save-schedule{padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-family:'Inter',sans-serif;font-size:12px;font-weight:600;cursor:pointer;align-self:flex-start;transition:opacity var(--transition);}
+.btn-save-schedule:hover{opacity:.85;}
 [data-tip]{position:relative;cursor:default;}
 [data-tip]::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:#0a1e2e;color:#e8f6f8;font-size:11.5px;font-weight:500;line-height:1.45;white-space:nowrap;padding:6px 10px;border-radius:7px;border:1px solid var(--border);box-shadow:var(--shadow-md);pointer-events:none;opacity:0;transition:opacity .15s ease;z-index:100;}
 [data-tip]:hover::after{opacity:1;}
@@ -253,6 +281,34 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
       </button>
     </div>
     <div class="pipeline-log" id="pipelineLog" style="display:none"></div>
+    <div class="schedule-wrap">
+      <div class="schedule-row">
+        <span class="schedule-title">Schedule</span>
+        <span class="schedule-summary" id="scheduleSummary">—</span>
+        <button class="btn-icon-sm" onclick="toggleScheduleEdit()" title="Configure schedule">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+      </div>
+      <div class="schedule-next" id="scheduleNext"></div>
+      <div class="schedule-edit" id="scheduleEditPanel" style="display:none">
+        <div class="schedule-mode-tabs">
+          <button class="smode-btn active" id="smode-off" onclick="setSchedMode('off')">Off</button>
+          <button class="smode-btn" id="smode-interval" onclick="setSchedMode('interval')">Interval</button>
+          <button class="smode-btn" id="smode-daily" onclick="setSchedMode('daily')">Daily</button>
+        </div>
+        <div id="schedIntervalRow" style="display:none" class="schedule-input-row">
+          <span class="schedule-hint">Every</span>
+          <input type="number" class="schedule-input" id="schedHours" min="1" max="48" value="4">
+          <span class="schedule-hint">hours</span>
+        </div>
+        <div id="schedDailyRow" style="display:none">
+          <input type="text" class="schedule-input-wide" id="schedTimes" placeholder="08:00, 12:00, 16:00, 20:00">
+          <div class="schedule-hint" style="margin-top:4px">Comma-separated times (HH:MM)</div>
+        </div>
+        <div class="schedule-sys" id="schedSysInfo" style="display:none"></div>
+        <button class="btn-save-schedule" onclick="saveSchedule()">Save</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -316,6 +372,13 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
       </div>
       <div class="tab-pane" id="pane-description">
         <div class="description-text" id="descriptionContent"></div>
+      </div>
+      <div class="apply-confirm" id="applyConfirm">
+        <span class="apply-confirm-text">Did you apply?</span>
+        <button class="btn-applied-yes" onclick="confirmApplied(true)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right:4px"><polyline points="20 6 9 17 4 12"/></svg>Yes, applied
+        </button>
+        <button class="btn-applied-no" onclick="confirmApplied(false)">Not yet</button>
       </div>
       <div class="action-bar" id="actionBar">
         <button class="btn-triage-action btn-reject" onclick="triageAction('rejected')">
@@ -529,10 +592,11 @@ function nextJob() { if (idx < jobs.length - 1) { idx++; renderCard(idx); } }
 async function triageAction(newStatus) {
   const job = jobs[idx];
   if (!job) return;
+  document.getElementById('applyConfirm').classList.remove('show');
   try {
     await api(`/api/jobs/${job.id}/status`, 'POST', {status: newStatus});
-    const icons = {shortlisted:'✓ Shortlisted', rejected:'✗ Rejected', deferred:'↑ Deferred'};
-    showToast(icons[newStatus] || newStatus, newStatus === 'shortlisted' ? 'success' : '');
+    const icons = {shortlisted:'✓ Shortlisted', rejected:'✗ Rejected', deferred:'↑ Deferred', applied:'✓ Marked as applied'};
+    showToast(icons[newStatus] || newStatus, newStatus === 'shortlisted' || newStatus === 'applied' ? 'success' : '');
     jobs.splice(idx, 1);
     if (jobs.length === 0) { renderEmpty(currentStatus); loadStats(); return; }
     if (idx >= jobs.length) idx = jobs.length - 1;
@@ -576,7 +640,20 @@ function copyCover() {
 
 function openApply() {
   const job = jobs[idx];
-  if (job && job.url) window.open(job.url, '_blank');
+  if (job && job.url) {
+    window.open(job.url, '_blank');
+    const banner = document.getElementById('applyConfirm');
+    banner.classList.remove('show');
+    void banner.offsetWidth;
+    banner.classList.add('show');
+  }
+}
+
+async function confirmApplied(didApply) {
+  document.getElementById('applyConfirm').classList.remove('show');
+  if (didApply) {
+    await triageAction('applied');
+  }
 }
 
 // ── Pipeline ───────────────────────────────────────────────────────────────
@@ -585,6 +662,7 @@ function togglePipeline() {
   document.getElementById('pipelinePanel').classList.toggle('open');
   if (document.getElementById('pipelinePanel').classList.contains('open')) {
     refreshPipelineStatus();
+    loadSchedule();
   }
 }
 
@@ -661,6 +739,84 @@ function updatePipelinePanel(data) {
     logEl.textContent = data.log.slice(-20).join('\n');
     logEl.scrollTop = logEl.scrollHeight;
   }
+}
+
+// ── Schedule ───────────────────────────────────────────────────────────────
+let _schedMode = 'off';
+
+async function loadSchedule() {
+  try {
+    const d = await api('/api/schedule');
+    renderSchedule(d);
+  } catch(e) {}
+}
+
+function renderSchedule(d) {
+  _schedMode = d.mode || 'off';
+  const sumEl = document.getElementById('scheduleSummary');
+  const nextEl = document.getElementById('scheduleNext');
+  if (d.mode === 'off') {
+    sumEl.textContent = 'Disabled';
+    sumEl.style.color = 'var(--text-muted)';
+    nextEl.textContent = '';
+  } else if (d.mode === 'interval') {
+    sumEl.textContent = `Every ${d.interval_hours}h`;
+    sumEl.style.color = 'var(--text-secondary)';
+  } else if (d.mode === 'daily') {
+    sumEl.textContent = (d.times || []).join(', ') || 'Daily';
+    sumEl.style.color = 'var(--text-secondary)';
+  }
+  if (d.next_run) {
+    const t = new Date(d.next_run);
+    nextEl.textContent = `Next: ${t.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+  } else { nextEl.textContent = ''; }
+  document.getElementById('schedHours').value = d.interval_hours || 4;
+  document.getElementById('schedTimes').value = (d.times || []).join(', ');
+  const sysEl = document.getElementById('schedSysInfo');
+  if (d.task_scheduler && d.task_scheduler.found) {
+    sysEl.textContent = `System task: ${d.task_scheduler.name}`;
+    sysEl.style.display = 'block';
+  } else { sysEl.style.display = 'none'; }
+  updateSchedModeBtns();
+}
+
+function toggleScheduleEdit() {
+  const panel = document.getElementById('scheduleEditPanel');
+  panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+  updateSchedModeBtns();
+  updateSchedRows();
+}
+
+function setSchedMode(mode) {
+  _schedMode = mode;
+  updateSchedModeBtns();
+  updateSchedRows();
+}
+
+function updateSchedModeBtns() {
+  ['off','interval','daily'].forEach(m => {
+    document.getElementById(`smode-${m}`).classList.toggle('active', m === _schedMode);
+  });
+}
+
+function updateSchedRows() {
+  document.getElementById('schedIntervalRow').style.display = _schedMode === 'interval' ? 'flex' : 'none';
+  document.getElementById('schedDailyRow').style.display = _schedMode === 'daily' ? 'block' : 'none';
+}
+
+async function saveSchedule() {
+  const times = document.getElementById('schedTimes').value
+    .split(',').map(t => t.trim()).filter(Boolean);
+  try {
+    const d = await api('/api/schedule', 'POST', {
+      mode: _schedMode,
+      interval_hours: parseInt(document.getElementById('schedHours').value) || 4,
+      times,
+    });
+    renderSchedule(d);
+    document.getElementById('scheduleEditPanel').style.display = 'none';
+    showToast('Schedule saved', 'success');
+  } catch(e) { showToast('Failed to save schedule', 'error'); }
 }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────
