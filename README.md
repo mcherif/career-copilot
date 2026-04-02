@@ -43,6 +43,7 @@ Each job passes through ingestion, deterministic scoring, LLM semantic evaluatio
 - Rule-based fit scoring (skill overlap, seniority, title relevance)
 - Local LLM reasoning via Ollama — structured outputs, fit explanation, skill gaps
 - Persistent job lifecycle tracking (new → review → shortlisted → applied)
+- Web UI for job triage, cover letter generation, and pipeline control
 - Natural language assistant with live database access and tool calling
 - Resume recommendation engine — best resume selected per job from tagged profiles
 - ATS detection and Playwright-powered form prefill (Greenhouse, Lever, Ashby, Workable)
@@ -75,6 +76,31 @@ Layer 3 — Human review
 ```
 
 This hybrid architecture avoids the two failure modes of pure-ML systems (opaque decisions) and pure rule systems (missed semantic matches).
+
+---
+
+## Web UI
+
+> **`python run_pipeline.py ui`**
+
+A browser-based triage interface for reviewing and acting on jobs without using the CLI.
+
+![Career Copilot Web UI](docs/ui-screenshot.png)
+
+**What it does:**
+
+- **Status strip** — live counts across all pipeline stages (New, Review, Shortlisted, Applied, Deferred, Rejected, Expired). Click any pill to jump to that queue.
+- **Job card** — one job at a time. Tabs for Overview (score, highlights, LLM confidence), Analysis (strengths, gaps, reasoning), Cover Letter (generate via Ollama), and full Description.
+- **Triage buttons** — Reject / Defer / Shortlist with a single click. The card advances automatically to the next job.
+- **Open & Apply** — opens the job URL in your browser.
+- **Pipeline panel** — trigger a full pipeline run from the UI and watch fetch → evaluate → analyze progress in real time.
+
+Launch it:
+
+```powershell
+python run_pipeline.py ui          # opens http://localhost:7860
+python run_pipeline.py ui --port 8080 --no-browser
+```
 
 ---
 
@@ -190,7 +216,10 @@ python run_pipeline.py full-run
 # Full run with email digest
 python run_pipeline.py full-run --email
 
-# Work through the review queue interactively
+# Launch the web triage UI
+python run_pipeline.py ui
+
+# Work through the review queue interactively (CLI)
 python run_pipeline.py triage
 
 # Open and prefill an application form
@@ -210,6 +239,7 @@ Run `python run_pipeline.py help` for the full reference. Key commands:
 |---|---|
 | `full-run` | Fetch + evaluate + LLM analyze in one shot |
 | `full-run --email` | Same, plus email digest if new jobs found |
+| `ui` | Launch the web triage interface at `localhost:7860` |
 | `triage` | Work through review jobs: shortlist / reject / open / skip |
 | `open-job` | Open a shortlisted job in browser with form prefill |
 | `ask` | Start the interactive LLM assistant |
