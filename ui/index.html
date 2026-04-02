@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Career Copilot</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+:root {
+  --bg:#f8f9fa; --bg-card:#fff; --bg-subtle:#f1f3f5; --bg-hover:#e9ecef;
+  --border:#dee2e6; --border-subtle:#e9ecef;
+  --text-primary:#1a1d23; --text-secondary:#495057; --text-muted:#868e96;
+  --accent:#3b82f6; --accent-light:#eff6ff; --accent-mid:#bfdbfe;
+  --green:#10b981; --green-light:#ecfdf5; --green-mid:#a7f3d0;
+  --red:#ef4444; --red-light:#fef2f2; --red-mid:#fecaca;
+  --orange:#f59e0b; --orange-light:#fffbeb; --orange-mid:#fde68a;
+  --purple:#8b5cf6; --purple-light:#f5f3ff;
+  --shadow-sm:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+  --shadow-md:0 4px 16px rgba(0,0,0,.08),0 2px 6px rgba(0,0,0,.04);
+  --shadow-lg:0 10px 40px rgba(0,0,0,.1),0 4px 12px rgba(0,0,0,.06);
+  --radius:10px; --radius-lg:16px; --radius-xl:20px; --transition:.18s ease;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text-primary);min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden;}
+.status-strip{background:var(--bg-card);border-bottom:1px solid var(--border);padding:12px 28px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.strip-logo{font-size:14px;font-weight:800;color:var(--text-primary);margin-right:12px;letter-spacing:-.5px;}
+.strip-logo span{color:var(--accent);}
+.strip-divider{width:1px;height:20px;background:var(--border);margin-right:4px;}
+.status-pill{display:flex;align-items:center;gap:5px;padding:5px 11px;border-radius:20px;font-size:12.5px;font-weight:600;cursor:pointer;transition:all var(--transition);user-select:none;}
+.status-pill .count{font-size:12px;font-weight:700;}
+.pill-new{background:var(--accent-light);color:var(--accent);}
+.pill-review{background:#fffbeb;color:#d97706;}
+.pill-review.active{background:#fde68a;box-shadow:0 0 0 2px #d97706;}
+.pill-shortlisted{background:var(--green-light);color:#059669;}
+.pill-shortlisted.active{background:var(--green-mid);box-shadow:0 0 0 2px #059669;}
+.pill-applied{background:var(--purple-light);color:var(--purple);}
+.pill-applied.active{background:#ddd6fe;box-shadow:0 0 0 2px var(--purple);}
+.pill-deferred{background:var(--bg-subtle);color:var(--text-secondary);}
+.pill-deferred.active{background:var(--bg-hover);box-shadow:0 0 0 2px var(--text-muted);}
+.pill-rejected{background:var(--red-light);color:var(--red);}
+.pill-rejected.active{background:var(--red-mid);box-shadow:0 0 0 2px var(--red);}
+.pill-expired{background:var(--bg-subtle);color:var(--text-muted);}
+.pill-new.active{background:var(--accent-mid);box-shadow:0 0 0 2px var(--accent);}
+.strip-spacer{flex:1;}
+.btn-pipeline{display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:all var(--transition);box-shadow:var(--shadow-sm);}
+.btn-pipeline:hover{background:#2563eb;box-shadow:0 0 0 3px rgba(59,130,246,.25);}
+.btn-pipeline svg{width:14px;height:14px;}
+.btn-pipeline.running{background:#d97706;}
+.pipeline-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:200;opacity:0;pointer-events:none;transition:opacity .25s ease;}
+.pipeline-overlay.open{opacity:1;pointer-events:all;}
+.pipeline-panel{position:fixed;right:0;top:0;bottom:0;width:360px;background:var(--bg-card);border-left:1px solid var(--border);box-shadow:-8px 0 32px rgba(0,0,0,.12);z-index:201;transform:translateX(100%);transition:transform .3s cubic-bezier(.34,1,.64,1);display:flex;flex-direction:column;}
+.pipeline-panel.open{transform:translateX(0);}
+.pipeline-header{padding:20px 24px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;gap:12px;}
+.pipeline-title{flex:1;font-size:15px;font-weight:700;color:var(--text-primary);}
+.btn-close{width:30px;height:30px;border-radius:50%;border:none;background:var(--bg-subtle);color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background var(--transition);font-size:16px;line-height:1;}
+.btn-close:hover{background:var(--bg-hover);}
+.pipeline-body{padding:24px;flex:1;display:flex;flex-direction:column;gap:20px;overflow-y:auto;}
+.pipeline-step{display:flex;gap:14px;align-items:flex-start;}
+.step-icon{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;}
+.step-icon.done{background:var(--green-light);color:var(--green);border:2px solid var(--green-mid);}
+.step-icon.running{background:var(--accent-light);color:var(--accent);border:2px solid var(--accent-mid);}
+.step-icon.pending{background:var(--bg-subtle);color:var(--text-muted);border:2px solid var(--border);}
+.step-content{flex:1;padding-top:4px;}
+.step-name{font-size:13.5px;font-weight:600;color:var(--text-primary);margin-bottom:3px;}
+.step-sub{font-size:12px;color:var(--text-muted);}
+.step-progress{margin-top:8px;height:4px;background:var(--bg-subtle);border-radius:2px;overflow:hidden;}
+.step-progress-fill{height:100%;border-radius:2px;background:var(--accent);transition:width .5s ease;}
+.pipeline-stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;}
+.pipeline-stat{background:var(--bg-subtle);border-radius:var(--radius);padding:12px 14px;text-align:center;}
+.pipeline-stat .num{font-size:22px;font-weight:800;color:var(--text-primary);}
+.pipeline-stat .lbl{font-size:11px;color:var(--text-muted);margin-top:2px;font-weight:500;}
+.pipeline-log{background:var(--bg-subtle);border-radius:var(--radius);padding:12px;font-size:11px;font-family:monospace;color:var(--text-secondary);max-height:150px;overflow-y:auto;line-height:1.6;}
+.triage-area{flex:1;display:flex;flex-direction:column;align-items:center;padding:32px 24px 24px;max-width:720px;margin:0 auto;width:100%;}
+.nav-row{display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:20px;width:100%;}
+.nav-btn{display:flex;align-items:center;gap:6px;padding:7px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:12.5px;font-weight:500;color:var(--text-secondary);cursor:pointer;transition:all var(--transition);box-shadow:var(--shadow-sm);}
+.nav-btn:hover{border-color:var(--accent-mid);color:var(--accent);background:var(--accent-light);}
+.nav-btn:disabled{opacity:.4;cursor:default;}
+.nav-btn svg{width:14px;height:14px;}
+.nav-counter{font-size:13px;font-weight:600;color:var(--text-secondary);padding:6px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm);min-width:160px;text-align:center;}
+.nav-counter strong{color:var(--text-primary);}
+.job-card-wrap{width:100%;position:relative;}
+.ghost-card{position:absolute;left:8px;right:8px;border-radius:var(--radius-xl);background:var(--bg-card);border:1px solid var(--border);}
+.ghost-card-2{top:-8px;bottom:8px;opacity:.5;left:14px;right:14px;}
+.ghost-card-1{top:-4px;bottom:4px;opacity:.75;left:6px;right:6px;}
+.job-card-main{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-xl);box-shadow:var(--shadow-lg);position:relative;z-index:2;overflow:hidden;transition:transform .3s ease,box-shadow .3s ease;}
+.card-top{padding:24px 28px 20px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:flex-start;gap:18px;}
+.company-circle{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:#fff;flex-shrink:0;box-shadow:var(--shadow-sm);}
+.card-header-info{flex:1;min-width:0;}
+.card-job-title{font-size:20px;font-weight:700;color:var(--text-primary);line-height:1.25;margin-bottom:6px;letter-spacing:-.4px;}
+.card-company-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.card-company{font-size:14px;font-weight:600;color:var(--text-secondary);}
+.tag{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:12px;font-weight:500;}
+.tag-location{background:var(--bg-subtle);color:var(--text-secondary);}
+.tag-remote{background:var(--green-light);color:#059669;}
+.tag-source{background:var(--accent-light);color:var(--accent);}
+.card-tabs{display:flex;gap:0;padding:0 28px;border-bottom:1px solid var(--border-subtle);}
+.card-tab{padding:13px 18px;font-size:13.5px;font-weight:500;color:var(--text-muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:color var(--transition),border-color var(--transition);user-select:none;white-space:nowrap;}
+.card-tab:hover{color:var(--text-secondary);}
+.card-tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600;}
+.tab-pane{display:none;padding:24px 28px;}
+.tab-pane.active{display:block;}
+.overview-layout{display:grid;grid-template-columns:auto 1fr;gap:28px;align-items:start;}
+.score-ring-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;}
+.score-ring{position:relative;width:100px;height:100px;}
+.score-ring svg{transform:rotate(-90deg);}
+.score-ring-bg{fill:none;stroke:var(--border);stroke-width:8;}
+.score-ring-fill{fill:none;stroke-width:8;stroke-linecap:round;transition:stroke-dashoffset 1s cubic-bezier(.34,1.56,.64,1);}
+.score-num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.score-val{font-size:26px;font-weight:800;line-height:1;letter-spacing:-1px;}
+.score-label{font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;}
+.score-ring-label{font-size:11.5px;font-weight:600;color:var(--text-muted);}
+.overview-row{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.overview-row-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);width:80px;flex-shrink:0;}
+.skills-chips{display:flex;flex-wrap:wrap;gap:5px;}
+.skill-chip{padding:3px 9px;border-radius:6px;font-size:12px;font-weight:500;background:var(--accent-light);color:var(--accent);border:1px solid var(--accent-mid);}
+.analysis-section{margin-bottom:20px;}
+.analysis-section:last-child{margin-bottom:0;}
+.analysis-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:10px;}
+.bullet-list{list-style:none;display:flex;flex-direction:column;gap:7px;}
+.bullet-list li{display:flex;align-items:flex-start;gap:8px;font-size:13.5px;color:var(--text-secondary);line-height:1.45;}
+.bullet-list li .dot{width:7px;height:7px;border-radius:50%;margin-top:5px;flex-shrink:0;}
+.bullet-list.strengths li .dot{background:var(--green);}
+.bullet-list.gaps li .dot{background:var(--orange);}
+.reasoning-block{background:var(--bg-subtle);border-radius:var(--radius);padding:14px 16px;font-size:13.5px;color:var(--text-secondary);line-height:1.65;border-left:3px solid var(--accent-mid);}
+.confidence-row{display:flex;align-items:center;gap:10px;margin-top:14px;}
+.confidence-label{font-size:12px;font-weight:600;color:var(--text-muted);}
+.confidence-bar{flex:1;height:6px;background:var(--bg-subtle);border-radius:3px;overflow:hidden;}
+.confidence-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--accent),#34d399);}
+.confidence-pct{font-size:13px;font-weight:700;color:var(--text-primary);font-variant-numeric:tabular-nums;}
+.cover-letter-wrap{display:flex;flex-direction:column;gap:12px;}
+.cover-letter-textarea{width:100%;height:240px;padding:14px 16px;font-family:'Inter',sans-serif;font-size:13px;line-height:1.7;color:var(--text-secondary);background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius);resize:vertical;outline:none;transition:border-color var(--transition);}
+.cover-letter-textarea:focus{border-color:var(--accent-mid);background:#fff;}
+.cover-letter-textarea.loading{color:var(--text-muted);font-style:italic;}
+.cover-actions{display:flex;gap:8px;}
+.btn-secondary{display:flex;align-items:center;gap:6px;padding:8px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:var(--text-secondary);cursor:pointer;transition:all var(--transition);box-shadow:var(--shadow-sm);}
+.btn-secondary:hover{border-color:var(--accent-mid);color:var(--accent);background:var(--accent-light);}
+.btn-secondary:disabled{opacity:.5;cursor:default;}
+.btn-secondary svg{width:13px;height:13px;}
+.description-text{font-size:13.5px;color:var(--text-secondary);line-height:1.75;max-height:260px;overflow-y:auto;padding-right:8px;}
+.description-text::-webkit-scrollbar{width:3px;}
+.description-text::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.action-bar{display:flex;align-items:center;gap:10px;padding:18px 28px;border-top:1px solid var(--border-subtle);background:var(--bg-card);}
+.btn-triage-action{display:flex;align-items:center;justify-content:center;gap:7px;padding:12px 0;border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s ease;border:2px solid transparent;flex:1;}
+.btn-reject{background:var(--red-light);color:var(--red);border-color:var(--red-mid);}
+.btn-reject:hover{background:var(--red);color:#fff;border-color:var(--red);box-shadow:0 4px 16px rgba(239,68,68,.3);transform:translateY(-1px);}
+.btn-defer{background:var(--bg-subtle);color:var(--text-secondary);border-color:var(--border);}
+.btn-defer:hover{background:var(--bg-hover);border-color:var(--text-muted);color:var(--text-primary);transform:translateY(-1px);}
+.btn-shortlist{background:var(--green-light);color:var(--green);border-color:var(--green-mid);}
+.btn-shortlist:hover{background:var(--green);color:#fff;border-color:var(--green);box-shadow:0 4px 16px rgba(16,185,129,.3);transform:translateY(-1px);}
+.action-sep{width:1px;height:36px;background:var(--border);flex-shrink:0;}
+.btn-open-apply{display:flex;align-items:center;gap:7px;padding:12px 20px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s ease;box-shadow:0 2px 8px rgba(59,130,246,.3);white-space:nowrap;flex-shrink:0;}
+.btn-open-apply:hover{background:#2563eb;box-shadow:0 4px 16px rgba(59,130,246,.4);transform:translateY(-1px);}
+.btn-open-apply svg{width:14px;height:14px;}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 40px;text-align:center;gap:12px;}
+.empty-state-icon{font-size:48px;opacity:.3;}
+.empty-state-title{font-size:18px;font-weight:700;color:var(--text-secondary);}
+.empty-state-sub{font-size:14px;color:var(--text-muted);}
+@keyframes slideIn{from{opacity:0;transform:translateX(40px) rotate(2deg);}to{opacity:1;transform:translateX(0) rotate(0deg);}}
+.slide-in{animation:slideIn .35s cubic-bezier(.34,1.56,.64,1);}
+@keyframes slideOut{to{opacity:0;transform:translateX(-40px) rotate(-2deg);}}
+.toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--text-primary);color:#fff;padding:10px 20px;border-radius:30px;font-size:13.5px;font-weight:500;z-index:300;transition:transform .3s cubic-bezier(.34,1.56,.64,1);pointer-events:none;box-shadow:var(--shadow-lg);}
+.toast.show{transform:translateX(-50%) translateY(0);}
+.toast.success{background:var(--green);}
+.toast.error{background:var(--red);}
+@keyframes spin{to{transform:rotate(360deg);}}
+.spin{animation:spin 1s linear infinite;display:inline-block;}
+</style>
+</head>
+<body>
+
+<header class="status-strip">
+  <div class="strip-logo">Career<span>Copilot</span></div>
+  <div class="strip-divider"></div>
+  <div class="status-pill pill-new" data-status="new" onclick="filterJobs('new',this)">
+    <span>New</span><span class="count">—</span>
+  </div>
+  <div class="status-pill pill-review active" data-status="review" onclick="filterJobs('review',this)">
+    <span>Review</span><span class="count">—</span>
+  </div>
+  <div class="status-pill pill-shortlisted" data-status="shortlisted" onclick="filterJobs('shortlisted',this)">
+    <span>Shortlisted</span><span class="count">—</span>
+  </div>
+  <div class="status-pill pill-applied" data-status="applied" onclick="filterJobs('applied',this)">
+    <span>Applied</span><span class="count">—</span>
+  </div>
+  <div class="status-pill pill-deferred" data-status="deferred" onclick="filterJobs('deferred',this)">
+    <span>Deferred</span><span class="count">—</span>
+  </div>
+  <div class="status-pill pill-rejected" data-status="rejected" onclick="filterJobs('rejected',this)">
+    <span>Rejected</span><span class="count">—</span>
+  </div>
+  <div class="status-pill pill-expired" data-status="expired" onclick="filterJobs('expired',this)">
+    <span>Expired</span><span class="count">—</span>
+  </div>
+  <div class="strip-spacer"></div>
+  <button class="btn-pipeline" id="pipelineBtn" onclick="togglePipeline()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+    Pipeline
+  </button>
+</header>
+
+<div class="pipeline-overlay" id="pipelineOverlay" onclick="closePipeline()"></div>
+<div class="pipeline-panel" id="pipelinePanel">
+  <div class="pipeline-header">
+    <div class="pipeline-title">Pipeline</div>
+    <button class="btn-close" onclick="closePipeline()">×</button>
+  </div>
+  <div class="pipeline-body">
+    <div class="pipeline-step">
+      <div class="step-icon pending" id="stepFetchIcon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+      </div>
+      <div class="step-content">
+        <div class="step-name">1. Fetch Jobs</div>
+        <div class="step-sub" id="stepFetchSub">Ready</div>
+        <div class="step-progress"><div class="step-progress-fill" id="stepFetchBar" style="width:0%"></div></div>
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-icon pending" id="stepEvalIcon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+      </div>
+      <div class="step-content">
+        <div class="step-name">2. Evaluate &amp; Score</div>
+        <div class="step-sub" id="stepEvalSub">Waiting…</div>
+        <div class="step-progress"><div class="step-progress-fill" id="stepEvalBar" style="width:0%"></div></div>
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-icon pending" id="stepAnalyzeIcon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+      </div>
+      <div class="step-content">
+        <div class="step-name">3. Deep Analysis</div>
+        <div class="step-sub" id="stepAnalyzeSub">Waiting…</div>
+        <div class="step-progress"><div class="step-progress-fill" id="stepAnalyzeBar" style="width:0%"></div></div>
+      </div>
+    </div>
+    <div class="pipeline-stats-grid" id="pipelineStatsGrid" style="display:none">
+      <div class="pipeline-stat"><div class="num" id="statTotal">—</div><div class="lbl">Total jobs</div></div>
+      <div class="pipeline-stat"><div class="num" id="statReview">—</div><div class="lbl">To review</div></div>
+      <div class="pipeline-stat"><div class="num" id="statShortlisted">—</div><div class="lbl">Shortlisted</div></div>
+      <div class="pipeline-stat"><div class="num" id="statRejected">—</div><div class="lbl">Rejected</div></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:4px;">
+      <button class="btn-secondary" id="btnRunPipeline" onclick="runPipeline()" style="flex:1;justify-content:center;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Run Now
+      </button>
+    </div>
+    <div class="pipeline-log" id="pipelineLog" style="display:none"></div>
+  </div>
+</div>
+
+<div class="triage-area" id="triageArea">
+  <div class="nav-row">
+    <button class="nav-btn" id="btnPrev" onclick="prevJob()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      prev
+    </button>
+    <div class="nav-counter" id="navCounter">Loading…</div>
+    <button class="nav-btn" id="btnNext" onclick="nextJob()">
+      next
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </button>
+  </div>
+
+  <div class="job-card-wrap" id="cardWrap">
+    <div class="ghost-card ghost-card-2"></div>
+    <div class="ghost-card ghost-card-1"></div>
+    <div class="job-card-main" id="jobCard">
+      <div class="card-top" id="cardTop"></div>
+      <div class="card-tabs">
+        <div class="card-tab active" onclick="switchTab('overview',this)">Overview</div>
+        <div class="card-tab" onclick="switchTab('analysis',this)">Analysis</div>
+        <div class="card-tab" onclick="switchTab('cover',this)">Cover Letter</div>
+        <div class="card-tab" onclick="switchTab('description',this)">Description</div>
+      </div>
+      <div class="tab-pane active" id="pane-overview">
+        <div class="overview-layout">
+          <div class="score-ring-wrap">
+            <div class="score-ring">
+              <svg width="100" height="100" viewBox="0 0 100 100">
+                <circle class="score-ring-bg" cx="50" cy="50" r="40"/>
+                <circle class="score-ring-fill" id="scoreRingFill" cx="50" cy="50" r="40" stroke-dasharray="251" stroke-dashoffset="251"/>
+              </svg>
+              <div class="score-num">
+                <div class="score-val" id="scoreVal">—</div>
+                <div class="score-label">Fit Score</div>
+              </div>
+            </div>
+            <div class="score-ring-label" id="scoreCategory">—</div>
+          </div>
+          <div class="overview-right" id="overviewRight"></div>
+        </div>
+      </div>
+      <div class="tab-pane" id="pane-analysis"><div id="analysisContent"></div></div>
+      <div class="tab-pane" id="pane-cover">
+        <div class="cover-letter-wrap">
+          <textarea class="cover-letter-textarea" id="coverText" placeholder="No cover letter yet. Click Generate to create one."></textarea>
+          <div class="cover-actions">
+            <button class="btn-secondary" id="btnGenerate" onclick="generateCover()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              Generate
+            </button>
+            <button class="btn-secondary" onclick="copyCover()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="tab-pane" id="pane-description">
+        <div class="description-text" id="descriptionContent"></div>
+      </div>
+      <div class="action-bar" id="actionBar">
+        <button class="btn-triage-action btn-reject" onclick="triageAction('rejected')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          Reject
+        </button>
+        <button class="btn-triage-action btn-defer" onclick="triageAction('deferred')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="5 12 12 5 19 12"/><polyline points="5 19 12 12 19 19"/></svg>
+          Defer
+        </button>
+        <button class="btn-triage-action btn-shortlist" onclick="triageAction('shortlisted')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+          Shortlist
+        </button>
+        <div class="action-sep"></div>
+        <button class="btn-open-apply" onclick="openApply()">
+          Open &amp; Apply
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let jobs = [];
+let idx = 0;
+let currentStatus = 'review';
+let activeTab = 'overview';
+let pipelinePoller = null;
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  loadStats();
+  loadJobs('review');
+});
+
+// ── Stats ──────────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const data = await api('/api/stats');
+    const c = data.counts || {};
+    document.querySelectorAll('.status-pill').forEach(el => {
+      const s = el.dataset.status;
+      el.querySelector('.count').textContent = c[s] ?? 0;
+    });
+    if (pipelinePoller) {
+      const sg = document.getElementById('pipelineStatsGrid');
+      if (sg) {
+        sg.style.display = 'grid';
+        document.getElementById('statTotal').textContent = data.total ?? '—';
+        document.getElementById('statReview').textContent = c.review ?? 0;
+        document.getElementById('statShortlisted').textContent = c.shortlisted ?? 0;
+        document.getElementById('statRejected').textContent = c.rejected ?? 0;
+      }
+    }
+  } catch(e) { console.warn('stats:', e); }
+}
+
+// ── Jobs ───────────────────────────────────────────────────────────────────
+async function loadJobs(status) {
+  currentStatus = status;
+  try {
+    const data = await api(`/api/jobs?status=${status}`);
+    jobs = data.jobs || [];
+    idx = 0;
+    if (jobs.length > 0) {
+      renderCard(idx);
+    } else {
+      renderEmpty(status);
+    }
+    updateNav();
+  } catch(e) {
+    console.error('loadJobs:', e);
+    renderEmpty(status);
+  }
+}
+
+function filterJobs(status, el) {
+  document.querySelectorAll('.status-pill').forEach(p => p.classList.remove('active'));
+  if (el) el.classList.add('active');
+  loadJobs(status);
+}
+
+// ── Card render ────────────────────────────────────────────────────────────
+function renderCard(i, direction) {
+  const job = jobs[i];
+  if (!job) return;
+
+  const card = document.getElementById('jobCard');
+  card.classList.remove('slide-in');
+  void card.offsetWidth;
+  card.classList.add('slide-in');
+
+  // Top section
+  document.getElementById('cardTop').innerHTML = `
+    <div class="company-circle" style="background:${job.avatar_color}">${job.avatar_text}</div>
+    <div class="card-header-info">
+      <div class="card-job-title">${esc(job.title)}</div>
+      <div class="card-company-row">
+        <span class="card-company">${esc(job.company)}</span>
+        <span class="tag tag-location">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          ${esc(job.location)}
+        </span>
+        <span class="tag tag-remote">Remote</span>
+        <span class="tag tag-source">${esc(job.source)}</span>
+        ${job.posted_date ? `<span class="tag" style="background:var(--bg-subtle);color:var(--text-muted);font-size:11px">${relativeDate(job.posted_date)}</span>` : ''}
+      </div>
+    </div>`;
+
+  // Score ring
+  const score = job.fit_score ?? 0;
+  const circumference = 251;
+  const offset = circumference - (score / 100) * circumference;
+  const ring = document.getElementById('scoreRingFill');
+  const colors = score >= 80 ? ['#10b981','#34d399'] : score >= 60 ? ['#f59e0b','#fbbf24'] : ['#ef4444','#f87171'];
+  ring.style.stroke = colors[0];
+  setTimeout(() => { ring.style.strokeDashoffset = offset; }, 50);
+  document.getElementById('scoreVal').textContent = score || '—';
+  document.getElementById('scoreVal').style.color = colors[0];
+  const cats = {9:'Excellent',8:'Strong',7:'Good',6:'Moderate',5:'Below avg',4:'Below avg'};
+  const cat = cats[Math.floor(score/10)] || (score >= 80 ? 'Excellent' : score >= 60 ? 'Good' : 'Weak');
+  document.getElementById('scoreCategory').textContent = cat;
+  document.getElementById('scoreCategory').style.color = colors[0];
+
+  // Overview right
+  const postedStr = job.posted_date ? new Date(job.posted_date).toLocaleDateString() : 'Unknown';
+  const skills = (job.strengths || []).slice(0,3).map(s => {
+    const word = s.split(' ').slice(0,2).join(' ');
+    return `<span class="skill-chip">${esc(word)}</span>`;
+  }).join('');
+  document.getElementById('overviewRight').innerHTML = `
+    <div class="overview-row">
+      <span class="overview-row-label">Confidence</span>
+      ${job.llm_confidence ? `<span style="font-size:14px;font-weight:700;color:var(--text-primary)">${job.llm_confidence}%</span>` : '<span style="color:var(--text-muted);font-size:13px">Not analyzed</span>'}
+    </div>
+    <div class="overview-row">
+      <span class="overview-row-label">Highlights</span>
+      <div class="skills-chips">${skills || '<span style="color:var(--text-muted);font-size:12px">—</span>'}</div>
+    </div>
+    <div class="overview-row">
+      <span class="overview-row-label">Posted</span>
+      <span style="font-size:13px;color:var(--text-secondary)">${postedStr}</span>
+    </div>
+    <div class="overview-row">
+      <span class="overview-row-label">LLM</span>
+      <span style="font-size:13px;color:var(--text-secondary)">${job.recommendation ? badge(job.recommendation) : '<span style="color:var(--text-muted)">—</span>'}</span>
+    </div>`;
+
+  // Analysis
+  const strengths = (job.strengths || []).map(s => `<li><span class="dot"></span>${esc(s)}</li>`).join('');
+  const gaps = (job.gaps || []).map(g => `<li><span class="dot"></span>${esc(g)}</li>`).join('');
+  document.getElementById('analysisContent').innerHTML = `
+    ${strengths ? `<div class="analysis-section"><div class="analysis-section-title">Strengths</div><ul class="bullet-list strengths">${strengths}</ul></div>` : ''}
+    ${gaps ? `<div class="analysis-section"><div class="analysis-section-title">Skill Gaps</div><ul class="bullet-list gaps">${gaps}</ul></div>` : ''}
+    ${job.reasoning ? `<div class="analysis-section"><div class="analysis-section-title">Reasoning</div><div class="reasoning-block">${esc(job.reasoning)}</div></div>` : ''}
+    ${job.llm_confidence ? `<div class="confidence-row"><span class="confidence-label">Confidence</span><div class="confidence-bar"><div class="confidence-fill" style="width:${job.llm_confidence}%"></div></div><span class="confidence-pct">${job.llm_confidence}%</span></div>` : ''}
+    ${!strengths && !gaps && !job.reasoning ? '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:20px 0">No LLM analysis yet. Run the pipeline with analyze enabled.</div>' : ''}`;
+
+  // Cover letter
+  const coverTextEl = document.getElementById('coverText');
+  coverTextEl.value = job.cover_letter || '';
+  coverTextEl.placeholder = 'No cover letter yet. Click Generate to create one.';
+  const btnGen = document.getElementById('btnGenerate');
+  btnGen.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> ${job.cover_letter ? 'Regenerate' : 'Generate'}`;
+  btnGen.disabled = false;
+
+  // Description
+  document.getElementById('descriptionContent').innerHTML = job.description
+    ? job.description.replace(/\n/g, '<br>')
+    : '<span style="color:var(--text-muted)">No description available.</span>';
+
+  // Action bar: show/hide triage for read-only statuses
+  const readOnly = ['applied','expired','rejected'].includes(job.status);
+  document.getElementById('actionBar').style.display = readOnly ? 'none' : 'flex';
+
+  // Reset to overview tab
+  switchTabById('overview');
+  updateNav();
+}
+
+function renderEmpty(status) {
+  document.getElementById('cardWrap').innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state-icon">✓</div>
+      <div class="empty-state-title">No ${status} jobs</div>
+      <div class="empty-state-sub">All caught up! Run the pipeline to fetch new jobs.</div>
+    </div>`;
+  document.getElementById('navCounter').textContent = `0 ${status} jobs`;
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function updateNav() {
+  const total = jobs.length;
+  const counter = document.getElementById('navCounter');
+  if (counter) counter.innerHTML = `<strong>${total > 0 ? idx + 1 : 0}</strong> / ${total} ${currentStatus} jobs`;
+  const prev = document.getElementById('btnPrev');
+  const next = document.getElementById('btnNext');
+  if (prev) prev.disabled = idx <= 0;
+  if (next) next.disabled = idx >= total - 1;
+}
+
+function prevJob() { if (idx > 0) { idx--; renderCard(idx); } }
+function nextJob() { if (idx < jobs.length - 1) { idx++; renderCard(idx); } }
+
+// ── Triage ─────────────────────────────────────────────────────────────────
+async function triageAction(newStatus) {
+  const job = jobs[idx];
+  if (!job) return;
+  try {
+    await api(`/api/jobs/${job.id}/status`, 'POST', {status: newStatus});
+    const icons = {shortlisted:'✓ Shortlisted', rejected:'✗ Rejected', deferred:'↑ Deferred'};
+    showToast(icons[newStatus] || newStatus, newStatus === 'shortlisted' ? 'success' : '');
+    jobs.splice(idx, 1);
+    if (jobs.length === 0) { renderEmpty(currentStatus); loadStats(); return; }
+    if (idx >= jobs.length) idx = jobs.length - 1;
+    renderCard(idx);
+    loadStats();
+  } catch(e) {
+    showToast('Failed to update status', 'error');
+  }
+}
+
+// ── Cover letter ───────────────────────────────────────────────────────────
+async function generateCover() {
+  const job = jobs[idx];
+  if (!job) return;
+  const btn = document.getElementById('btnGenerate');
+  const textarea = document.getElementById('coverText');
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spin">↻</span> Generating…`;
+  textarea.value = '';
+  textarea.placeholder = 'Generating with Ollama…';
+  try {
+    const data = await api(`/api/jobs/${job.id}/cover-letter`, 'POST');
+    textarea.value = data.cover_letter || '';
+    job.cover_letter = data.cover_letter;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Regenerate`;
+    showToast('Cover letter generated', 'success');
+  } catch(e) {
+    textarea.placeholder = 'Generation failed. Make sure Ollama is running.';
+    showToast('Generation failed', 'error');
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Retry`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function copyCover() {
+  const text = document.getElementById('coverText').value;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard', 'success'));
+}
+
+function openApply() {
+  const job = jobs[idx];
+  if (job && job.url) window.open(job.url, '_blank');
+}
+
+// ── Pipeline ───────────────────────────────────────────────────────────────
+function togglePipeline() {
+  document.getElementById('pipelineOverlay').classList.toggle('open');
+  document.getElementById('pipelinePanel').classList.toggle('open');
+  if (document.getElementById('pipelinePanel').classList.contains('open')) {
+    refreshPipelineStatus();
+  }
+}
+
+function closePipeline() {
+  document.getElementById('pipelineOverlay').classList.remove('open');
+  document.getElementById('pipelinePanel').classList.remove('open');
+}
+
+async function runPipeline() {
+  const btn = document.getElementById('btnRunPipeline');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin">↻</span> Starting…';
+  document.getElementById('pipelineBtn').classList.add('running');
+  document.getElementById('pipelineLog').style.display = 'block';
+  try {
+    await api('/api/pipeline/run', 'POST');
+    showToast('Pipeline started');
+    startPolling();
+  } catch(e) {
+    btn.disabled = false;
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Now';
+    showToast('Failed to start pipeline', 'error');
+  }
+}
+
+function startPolling() {
+  if (pipelinePoller) clearInterval(pipelinePoller);
+  pipelinePoller = setInterval(refreshPipelineStatus, 2000);
+}
+
+async function refreshPipelineStatus() {
+  try {
+    const data = await api('/api/pipeline/status');
+    updatePipelinePanel(data);
+    if (data.status === 'done' || data.status === 'failed') {
+      if (pipelinePoller) { clearInterval(pipelinePoller); pipelinePoller = null; }
+      document.getElementById('pipelineBtn').classList.remove('running');
+      const btn = document.getElementById('btnRunPipeline');
+      btn.disabled = false;
+      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Now';
+      loadStats();
+      loadJobs(currentStatus);
+      if (data.status === 'done') showToast('Pipeline complete', 'success');
+    }
+  } catch(e) { console.warn('poll:', e); }
+}
+
+function updatePipelinePanel(data) {
+  const steps = data.steps || {};
+  [['fetch','stepFetch'],['evaluate','stepEval'],['analyze','stepAnalyze']].forEach(([k,id]) => {
+    const step = steps[k] || {};
+    const icon = document.getElementById(id+'Icon');
+    const sub  = document.getElementById(id+'Sub');
+    const bar  = document.getElementById(id+'Bar');
+    if (!icon) return;
+    icon.className = 'step-icon ' + (step.status || 'pending');
+    if (step.status === 'done') {
+      icon.innerHTML = '✓';
+      if (bar) { bar.style.width='100%'; bar.style.background='var(--green)'; }
+      if (sub && step.detail) sub.textContent = step.detail;
+      else if (sub) sub.textContent = 'Complete';
+    } else if (step.status === 'running') {
+      icon.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 1s linear infinite"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>';
+      if (bar) bar.style.width = '60%';
+      if (sub) sub.textContent = 'Running…';
+    } else {
+      icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>';
+      if (bar) bar.style.width = '0%';
+    }
+  });
+  // Log
+  const logEl = document.getElementById('pipelineLog');
+  if (logEl && data.log && data.log.length > 0) {
+    logEl.textContent = data.log.slice(-20).join('\n');
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+function switchTab(name, el) {
+  document.querySelectorAll('.card-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  if (el) el.classList.add('active');
+  const pane = document.getElementById('pane-' + name);
+  if (pane) pane.classList.add('active');
+  activeTab = name;
+}
+
+function switchTabById(name) {
+  const tabs = document.querySelectorAll('.card-tab');
+  const panes = document.querySelectorAll('.tab-pane');
+  tabs.forEach((t, i) => {
+    const names = ['overview','analysis','cover','description'];
+    t.classList.toggle('active', names[i] === name);
+  });
+  panes.forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));
+  activeTab = name;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+async function api(url, method='GET', body=null) {
+  const opts = {method, headers:{'Content-Type':'application/json'}};
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(url, opts);
+  if (!r.ok) { const t = await r.text(); throw new Error(t); }
+  return r.json();
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function relativeDate(iso) {
+  const d = new Date(iso), now = new Date();
+  const diff = Math.floor((now - d) / 86400000);
+  if (diff === 0) return 'today';
+  if (diff === 1) return 'yesterday';
+  if (diff < 7) return `${diff}d ago`;
+  if (diff < 30) return `${Math.floor(diff/7)}w ago`;
+  return `${Math.floor(diff/30)}mo ago`;
+}
+
+function badge(rec) {
+  const map = {shortlist:'<span style="color:var(--green);font-weight:700">Shortlist</span>', review:'<span style="color:var(--orange);font-weight:700">Review</span>', reject:'<span style="color:var(--red);font-weight:700">Reject</span>'};
+  return map[rec] || rec;
+}
+
+let _toastTimer;
+function showToast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type ? ' '+type : '');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
+}
+</script>
+</body>
+</html>

@@ -1289,5 +1289,20 @@ def cover_letter_cmd(job_id: int, profile: str, model: str, regenerate: bool):
         session.close()
 
 
+@cli.command(name='ui')
+@click.option('--port', default=7860, type=int, show_default=True)
+@click.option('--no-browser', is_flag=True, help='Do not open browser automatically')
+def ui_cmd(port: int, no_browser: bool):
+    """Launch the Career Copilot web UI."""
+    import webbrowser
+    import uvicorn
+
+    url = f"http://localhost:{port}"
+    if not no_browser:
+        webbrowser.open(url)
+    click.echo(f"Starting Career Copilot UI at {url}")
+    uvicorn.run("ui.app:app", host="127.0.0.1", port=port, reload=False)
+
+
 if __name__ == '__main__':
     cli()
