@@ -1231,5 +1231,63 @@ def ask(model: str):
         session.close()
 
 
+@cli.command(name='cover-letter')
+@click.option('--job-id', required=True, type=int, help='ID of the shortlisted job')
+@click.option('--profile', default='profile.yaml', show_default=True, help='Path to candidate profile YAML')
+@click.option('--model', default=config.OLLAMA_MODEL, show_default=True, help='Ollama model name')
+@click.option('--regenerate', is_flag=True, help='Overwrite existing cover letter')
+def cover_letter_cmd(job_id: int, profile: str, model: str, regenerate: bool):
+    """Generate a tailored cover letter for a shortlisted job and save it to the DB."""
+    from utils.cover_letter import generate_cover_letter
+
+    profile_data = _load_profile(profile)
+    if not profile_data:
+        click.echo(click.style(f"Could not load profile from {profile}", fg="red"))
+        return
+
+    session = SessionLocal()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            click.echo(click.style(f"Job {job_id} not found.", fg="red"))
+            return
+        if job.status != "shortlisted":
+            click.echo(click.style(
+                f"Job {job_id} has status='{job.status}'. Cover letters are only generated for shortlisted jobs.",
+                fg="yellow",
+            ))
+            return
+        if job.cover_letter and not regenerate:
+            click.echo(click.style("Cover letter already exists (use --regenerate to overwrite):\n", fg="cyan"))
+            click.echo(job.cover_letter)
+            return
+
+        click.echo(f"Generating cover letter for: {job.title} @ {job.company} (model: {model})...")
+
+        job_dict = {
+            "title": job.title,
+            "company": job.company,
+            "location": job.location,
+            "raw_location_text": job.raw_location_text,
+            "description": job.description,
+            "description_text": job.description_text,
+            "fit_explanation": job.fit_explanation,
+            "llm_strengths": job.llm_strengths,
+        }
+
+        result = generate_cover_letter(job_dict, profile_data, model=model)
+
+        if result["status"] == "ok":
+            job.cover_letter = result["cover_letter"]
+            session.commit()
+            click.echo(click.style("\n--- Cover Letter ---\n", fg="cyan"))
+            click.echo(result["cover_letter"])
+            click.echo(click.style("\n--- End ---", fg="cyan"))
+        else:
+            click.echo(click.style(f"Generation failed: {result.get('error')}", fg="red"))
+    finally:
+        session.close()
+
+
 if __name__ == '__main__':
     cli()

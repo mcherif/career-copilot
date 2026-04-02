@@ -29,6 +29,7 @@ class Job(Base):
     llm_confidence = Column(Integer, nullable=True)
     llm_status = Column(String, nullable=True)
     recommended_resume = Column(String, nullable=True)
+    cover_letter = Column(Text, nullable=True)
     posted_date = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
