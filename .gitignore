@@ -44,6 +44,9 @@ logs/
 ehthumbs.db
 Thumbs.db
 
+# Design artifacts
+mockups/
+
 # Private Candidate Data
 resumes/
 *.pdf
