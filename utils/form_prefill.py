@@ -7,7 +7,7 @@ Extracted from the open-job CLI command so it can be tested independently.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict
+from typing import Any, Dict, Set
 
 from playwright.async_api import async_playwright  # noqa: F401 — imported for patching
 from utils.ats_detector import MANUAL_ONLY_ATS, detect_ats
@@ -42,6 +42,9 @@ async def run_prefill_session(
     fill fields from profile, and upload resume.
 
     Keeps the browser open until the user closes it (or wait_timeout seconds).
+    A background watcher continuously monitors for navigation to any ATS
+    application page — so even if the user manually clicks "Apply" on a
+    listing aggregator, the form is filled automatically once it loads.
 
     Returns one of:
         {"status": "ok",     "ats": str, "filled": int, "skipped": int, "errors": int}
@@ -71,8 +74,12 @@ async def run_prefill_session(
                 return {"status": "failed", "error": f"Page load failed: {exc}"}
 
             # Resolve direct apply URL from listing aggregators.
+            # Retry once if nothing is found — the button may be JS-rendered.
             try:
                 resolved = await extract_apply_url(page)
+                if not resolved:
+                    await page.wait_for_timeout(3000)
+                    resolved = await extract_apply_url(page)
                 if resolved and resolved != url:
                     await page.goto(resolved, wait_until="load", timeout=30000)
                     await _wait_for_spa(page)
@@ -101,37 +108,33 @@ async def run_prefill_session(
                 ats = detect_ats(active_page.url)
 
             result: Dict[str, Any] = {"ats": ats, "filled": 0, "skipped": 0, "errors": 0}
+            filled_ats: Set[str] = set()
 
-            if ats not in MANUAL_ONLY_ATS:
-                try:
-                    fields = await scan_fields(active_page)
-                except Exception:
-                    fields = []
-
-                if fields:
-                    try:
-                        actions = await fill_form(active_page, fields, profile, job)
-                        result["filled"] = sum(
-                            1 for a in actions if a["action"] in ("filled", "checked", "selected")
-                        )
-                        result["skipped"] = sum(1 for a in actions if a["action"] == "skipped")
-                        result["errors"] = sum(1 for a in actions if a["action"] == "error")
-                    except Exception:
-                        pass
-
-                try:
-                    await try_upload_resume(active_page, profile, job)
-                except Exception:
-                    pass
+            # Initial fill on whichever page we landed on.
+            if ats not in MANUAL_ONLY_ATS and ats != "unknown":
+                await _do_fill(active_page, profile, job, result)
+                filled_ats.add(ats)
 
             # Keep browser open — wait for user to close it.
+            # Concurrently watch for navigation to any ATS page so we can fill
+            # automatically even if the user navigated there manually.
             closed_event = asyncio.Event()
             active_page.on("close", lambda: closed_event.set())
             browser.on("disconnected", lambda: closed_event.set())
 
+            watch_task = asyncio.create_task(
+                _watch_for_ats_and_fill(active_page, profile, job, result, closed_event, filled_ats)
+            )
+
             try:
                 await asyncio.wait_for(closed_event.wait(), timeout=wait_timeout)
             except asyncio.TimeoutError:
+                pass
+
+            watch_task.cancel()
+            try:
+                await asyncio.wait_for(watch_task, timeout=2)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
 
             try:
@@ -144,6 +147,65 @@ async def run_prefill_session(
 
     except Exception as exc:
         return {"status": "failed", "error": str(exc)}
+
+
+async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: Dict[str, Any]) -> None:
+    """Scan and fill all form fields on the current page; update result in place."""
+    try:
+        fields = await scan_fields(page)
+    except Exception:
+        fields = []
+
+    if fields:
+        try:
+            actions = await fill_form(page, fields, profile, job)
+            result["filled"] += sum(
+                1 for a in actions if a["action"] in ("filled", "checked", "selected")
+            )
+            result["skipped"] += sum(1 for a in actions if a["action"] == "skipped")
+            result["errors"] += sum(1 for a in actions if a["action"] == "error")
+        except Exception:
+            pass
+
+    try:
+        await try_upload_resume(page, profile, job)
+    except Exception:
+        pass
+
+
+async def _watch_for_ats_and_fill(
+    page,
+    profile: Dict[str, Any],
+    job: Dict[str, Any],
+    result: Dict[str, Any],
+    closed_event: asyncio.Event,
+    filled_ats: Set[str],
+    poll_interval: float = 1.5,
+) -> None:
+    """Poll the page URL every poll_interval seconds.
+
+    When it detects navigation to a new ATS application page (one we haven't
+    filled yet), waits for the SPA to render then fills the form.  This handles
+    the common case where the user manually clicks an "Apply" button on a job
+    listing aggregator — the fill fires as soon as they land on the ATS page.
+    """
+    while not closed_event.is_set():
+        await asyncio.sleep(poll_interval)
+        if closed_event.is_set():
+            break
+        try:
+            current_ats = detect_ats(page.url)
+            if current_ats in MANUAL_ONLY_ATS or current_ats == "unknown":
+                continue
+            if current_ats in filled_ats:
+                continue
+            # New ATS page — wait for the SPA to render then fill.
+            await _wait_for_spa(page)
+            result["ats"] = current_ats
+            await _do_fill(page, profile, job, result)
+            filled_ats.add(current_ats)
+        except Exception:
+            pass
 
 
 async def _wait_for_spa(page) -> None:

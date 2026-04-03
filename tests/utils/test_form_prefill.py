@@ -404,3 +404,45 @@ def test_no_fields_detected_skips_fill():
     result = asyncio.run(_run())
     assert result["status"] == "ok"
     fill_mock.assert_not_called()
+
+
+def test_watcher_fills_after_user_navigates_to_ats():
+    """_watch_for_ats_and_fill should fill the form when the page navigates to
+    an ATS URL that was not yet in filled_ats (e.g. user manually clicked Apply)."""
+    from utils.form_prefill import _watch_for_ats_and_fill
+
+    page = _make_page(url="https://euremotejobs.com/job/some-job/")
+    fill_mock = AsyncMock(return_value=[{"action": "filled"}, {"action": "filled"}])
+    scan_mock = AsyncMock(return_value=["f1", "f2"])
+
+    # First detect_ats call returns "unknown"; subsequent ones return "ashby"
+    # (simulating the user navigating from the listing to the ATS form).
+    detect_calls = [0]
+
+    def _detect(url):
+        detect_calls[0] += 1
+        return "unknown" if detect_calls[0] <= 1 else "ashby"
+
+    result: dict = {"filled": 0, "skipped": 0, "errors": 0}
+    filled_ats: set = set()
+    closed_event = asyncio.Event()
+
+    async def _run():
+        async def _close_later():
+            await asyncio.sleep(0.15)
+            closed_event.set()
+
+        asyncio.create_task(_close_later())
+        with patch("utils.form_prefill.scan_fields", scan_mock), \
+             patch("utils.form_prefill.fill_form", fill_mock), \
+             patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
+             patch("utils.form_prefill.detect_ats", side_effect=_detect):
+            await _watch_for_ats_and_fill(
+                page, PROFILE, JOB, result, closed_event, filled_ats, poll_interval=0.05
+            )
+
+    asyncio.run(_run())
+    assert result["filled"] == 2
+    assert result["ats"] == "ashby"
+    scan_mock.assert_called()
+    fill_mock.assert_called()
