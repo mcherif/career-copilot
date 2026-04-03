@@ -157,13 +157,27 @@ async def fill_form(
 
     for idx, field in enumerate(fields):
         label = _effective_label(field, context_map.get(idx, ""))
-        label_lower = label.lower()
+        # Build a richer match string for value resolution by prepending the
+        # DOM context (section header).  This handles ATSes like Ashby that
+        # label URL inputs with just "(Link)" inside a "LinkedIn" section —
+        # the combined string "LinkedIn (Link)" correctly hits the linkedin rule.
+        ctx = context_map.get(idx, "")
+        if ctx and ctx.lower() not in label.lower():
+            label_lower = f"{ctx} {label}".lower()
+        else:
+            label_lower = label.lower()
+        # If the label is still too vague, also try the raw placeholder.
+        ph_lower = (field.get("placeholder") or "").lower()
         ftype = field["type"]
         fname = field["name"]
 
         # ---- text-like inputs -----------------------------------------
         if ftype in ("text", "email", "tel", "number", "url", "textarea"):
             value = _resolve_text_value(label_lower, profile, job)
+            # Fallback: match by placeholder when label gives nothing
+            # (e.g. placeholder="https://www.linkedin.com/in/..." → linkedin rule).
+            if not value and ph_lower and ph_lower not in _GENERIC_PLACEHOLDERS:
+                value = _resolve_text_value(ph_lower, profile, job)
 
             # For anonymous/generic fields fall back to position heuristic.
             if value == "" and idx in anon_text_position:
