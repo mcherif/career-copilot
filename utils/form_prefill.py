@@ -125,7 +125,7 @@ async def run_prefill_session(
             try:
                 resolved = await extract_apply_url(page)
                 if not resolved:
-                    await page.wait_for_timeout(3000)
+                    await page.wait_for_timeout(1000)
                     resolved = await extract_apply_url(page)
                 if resolved and resolved != url:
                     await page.goto(resolved, wait_until="load", timeout=30000)

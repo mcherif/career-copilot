@@ -360,10 +360,13 @@ async def fill_form(
                                 await el.select_option(value=value)
                             except Exception:
                                         # Partial match or gender-synonym match.
-                                options = await el.query_selector_all("option")
-                                opt_texts = [(await o.inner_text()).strip() for o in options]
-                                opt_vals  = [await o.get_attribute("value") or t
-                                             for o, t in zip(options, opt_texts)]
+                                # Fetch all options in one JS round-trip.
+                                option_data = await el.evaluate(
+                                    "el => Array.from(el.options).map(o => "
+                                    "({t: o.text.trim(), v: o.value || o.text.trim()}))"
+                                )
+                                opt_texts = [o["t"] for o in option_data]
+                                opt_vals  = [o["v"] for o in option_data]
                                 chosen_val = None
                                 # 1. Simple partial match (e.g. "male" in "Male").
                                 for t, v in zip(opt_texts, opt_vals):
@@ -631,35 +634,66 @@ def _pick_radio(
 
 
 async def _build_context_map(page: Page, fields: list[dict]) -> dict[int, str]:
-    """Look up the DOM for the nearest preceding text block for fields that
-    have no label or placeholder of their own (e.g. Notion anonymous inputs).
+    """Look up the DOM for the nearest preceding text block for unlabelled fields.
 
-    Radio/checkbox fields are skipped — their label IS the option text, and
-    resolving context for all 160+ of them triggers Notion's lazy-render
-    scroll.  Radio group display names fall back to the selected option label.
+    All DOM walking is done in a single JS round-trip:
+    - Named/id'd fields: batch DOM-walk via getElementById / querySelector
+    - Fully anonymous fields: TreeWalker pass in DOM order
 
-    For fully anonymous fields (no id, no name, generic placeholder) a single
-    batch JS call retrieves context by DOM position without individual lookups.
-
+    Radio/checkbox fields are skipped — their label IS the option text.
     Returns a dict mapping field-index → context string.
     """
     context_map: dict[int, str] = {}
 
-    # Fields with id or name: walk DOM per element (cheap, few of these).
-    for idx, field in enumerate(fields):
-        if field.get("label") or field.get("placeholder"):
-            continue
-        if not field.get("id") and not field.get("name"):
-            continue  # handled by batch below
+    # --- Batch 1: fields with id or name but no label/placeholder -----------
+    named_indices = [
+        idx for idx, f in enumerate(fields)
+        if not f.get("label") and not f.get("placeholder")
+        and (f.get("id") or f.get("name"))
+        and f.get("type") not in ("checkbox", "radio")
+    ]
+    if named_indices:
+        descriptors = [
+            {"id": fields[i].get("id") or "", "name": fields[i].get("name") or "",
+             "type": fields[i].get("type") or "", "tag": fields[i].get("tag") or "input"}
+            for i in named_indices
+        ]
         try:
-            context = await _get_dom_context(page, field)
-            if context:
-                context_map[idx] = context
+            results: list[str] = await page.evaluate(
+                """(descriptors) => {
+                    function getCtx(fid, fname, ftype, tag) {
+                        let el = fid ? document.getElementById(fid) : null;
+                        if (!el && fname && !['checkbox','radio'].includes(ftype))
+                            el = document.querySelector(tag + '[name="' + fname + '"]');
+                        if (!el) return '';
+                        let node = el.parentElement;
+                        for (let d = 0; d < 10; d++) {
+                            if (!node) break;
+                            let sib = node.previousElementSibling;
+                            while (sib) {
+                                const t = (sib.innerText || '').trim();
+                                if (t.length > 2 && t.length < 300) return t;
+                                sib = sib.previousElementSibling;
+                            }
+                            const direct = (node.firstChild &&
+                                node.firstChild.textContent || '').trim();
+                            if (direct.length > 2 && direct.length < 300 &&
+                                direct !== (el.innerText || '').trim()) return direct;
+                            node = node.parentElement;
+                        }
+                        return '';
+                    }
+                    return descriptors.map(f => getCtx(f.id, f.name, f.type, f.tag));
+                }""",
+                descriptors,
+            )
+            for pos, idx in enumerate(named_indices):
+                if pos < len(results) and results[pos]:
+                    context_map[idx] = results[pos]
         except Exception:
             pass
 
-    # Fully anonymous fields (no id, no name): one JS call to get context
-    # for all of them in DOM order, then map back to field indices.
+    # --- Batch 2: fully anonymous fields — TreeWalker in DOM order ----------
     anon_indices = [
         idx for idx, f in enumerate(fields)
         if not f.get("id") and not f.get("name") and not f.get("label")
@@ -677,17 +711,10 @@ async def _build_context_map(page: Page, fields: list[dict]) -> dict[int, str]:
                     const inputs = Array.from(document.querySelectorAll(sel))
                         .filter(el => el.offsetParent !== null);
                     if (!inputs.length) return [];
-
-                    // Single pass: walk all nodes in document order.
-                    // Track the last short text seen; when we hit a target
-                    // input, that text is its label.  Reset after each input
-                    // so labels don't bleed across questions.
                     const results = new Array(inputs.length).fill('');
-                    let lastText = '';
-                    let nextIdx = 0;
+                    let lastText = '', nextIdx = 0;
                     const walker = document.createTreeWalker(
-                        document.body, NodeFilter.SHOW_ALL
-                    );
+                        document.body, NodeFilter.SHOW_ALL);
                     let node;
                     while ((node = walker.nextNode()) && nextIdx < inputs.length) {
                         if (node.nodeType === Node.TEXT_NODE) {
