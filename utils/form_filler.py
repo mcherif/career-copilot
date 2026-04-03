@@ -257,6 +257,13 @@ async def fill_form(
                     else:
                         el = await _locate_field(page, field)
                     if el:
+                        # Skip fields that already have a value — the user
+                        # may have filled them manually or a previous pass ran.
+                        existing = (await el.input_value()).strip()
+                        if existing:
+                            actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
+                                            "action": "skipped", "value": f"already filled: {existing[:40]}"})
+                            continue
                         await el.fill(value, force=True)
                     else:
                         actions.append({"field": label or f"anon-text-{idx}", "type": ftype,

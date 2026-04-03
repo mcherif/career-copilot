@@ -278,16 +278,24 @@ async def _scan_with_frame_fallback(page):
 
     # Check child frames — some ATSes (e.g. Comeet) embed the application
     # form inside an iframe on the job listing page.
+    # Pick the frame with the most fields (not the first) so that cookie
+    # banners or social widgets with 1-2 inputs don't win over the real form.
+    best_fields: list[dict] = []
+    best_frame = None
     for frame in page.frames[1:]:
         url = frame.url or ""
         if not url or url == "about:blank":
             continue
         try:
             frame_fields = await scan_fields(frame)
-            if frame_fields:
-                return frame_fields, frame
+            if len(frame_fields) > len(best_fields):
+                best_fields = frame_fields
+                best_frame = frame
         except Exception:
             pass
+
+    if best_frame is not None:
+        return best_fields, best_frame
 
     return [], page
 
