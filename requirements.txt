@@ -12,5 +12,6 @@ keyring
 fastapi
 uvicorn[standard]
 psutil
+httpx
 python-docx
 apscheduler
