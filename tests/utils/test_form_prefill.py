@@ -12,11 +12,25 @@ JOB = {"id": 1, "title": "SWE", "company": "Acme", "url": "https://jobs.ashbyhq.
 PROFILE = {"name": "Jane Doe", "email": "jane@example.com"}
 
 
+def _make_context():
+    """Return a mock BrowserContext that records new-page callbacks."""
+    ctx = MagicMock()
+    _callbacks = {}
+
+    def _on(event, cb):
+        _callbacks.setdefault(event, []).append(cb)
+
+    ctx.on = MagicMock(side_effect=_on)
+    ctx._callbacks = _callbacks
+    return ctx
+
+
 def _make_page(url="https://jobs.ashbyhq.com/acme/123/application"):
     page = AsyncMock()
     page.url = url
     page.goto = AsyncMock()
     page.wait_for_timeout = AsyncMock()
+    page.context = _make_context()
     _callbacks = {}
 
     def _on(event, cb):
@@ -442,6 +456,53 @@ def test_watcher_fills_after_user_navigates_to_ats():
             )
 
     asyncio.run(_run())
+    assert result["filled"] == 2
+    assert result["ats"] == "ashby"
+    scan_mock.assert_called()
+    fill_mock.assert_called()
+
+
+def test_new_tab_triggers_fill():
+    """When the user clicks a target=_blank Apply link, a new tab opens.
+    The context.on('page') handler should detect the ATS URL and fill it."""
+    # Listing page — automation stays here, user opens Ashby in a new tab.
+    listing_page = _make_page(url="https://euremotejobs.com/job/some-job/")
+    # The new Ashby tab that opens when the user clicks Apply.
+    ashby_tab = _make_page(url="https://jobs.ashbyhq.com/acme/123/application")
+    browser = _make_browser(listing_page)
+    pw_cm = _make_pw_context(browser)
+
+    fill_mock = AsyncMock(return_value=[{"action": "filled"}, {"action": "filled"}])
+    scan_mock = AsyncMock(return_value=["f1", "f2"])
+
+    def _detect(url):
+        if "ashbyhq" in url:
+            return "ashby"
+        return "unknown"
+
+    async def _run():
+        async def _simulate_new_tab():
+            # Give the session time to register the context.on("page") handler,
+            # then fire it with the new Ashby tab.
+            await asyncio.sleep(0.05)
+            for cb in listing_page.context._callbacks.get("page", []):
+                cb(ashby_tab)
+            # Close shortly after so the session ends.
+            await asyncio.sleep(0.2)
+            _fire_close(listing_page)
+
+        asyncio.create_task(_simulate_new_tab())
+        with patch("utils.form_prefill.async_playwright", return_value=pw_cm), \
+             patch("utils.form_prefill.extract_apply_url", new_callable=AsyncMock, return_value=None), \
+             patch("utils.form_prefill.try_click_apply", new_callable=AsyncMock, return_value=(False, listing_page)), \
+             patch("utils.form_prefill.scan_fields", scan_mock), \
+             patch("utils.form_prefill.fill_form", fill_mock), \
+             patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
+             patch("utils.form_prefill.detect_ats", side_effect=_detect):
+            return await run_prefill_session(JOB, PROFILE, wait_timeout=5)
+
+    result = asyncio.run(_run())
+    assert result["status"] == "ok"
     assert result["filled"] == 2
     assert result["ats"] == "ashby"
     scan_mock.assert_called()

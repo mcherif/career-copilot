@@ -42,9 +42,12 @@ async def run_prefill_session(
     fill fields from profile, and upload resume.
 
     Keeps the browser open until the user closes it (or wait_timeout seconds).
-    A background watcher continuously monitors for navigation to any ATS
-    application page — so even if the user manually clicks "Apply" on a
-    listing aggregator, the form is filled automatically once it loads.
+
+    Handles two navigation patterns:
+    - Same-tab: automation or user navigates listing page → ATS form in place.
+      Detected by polling active_page.url every 1.5 s.
+    - New-tab: "Apply" button has target="_blank", Ashby opens in a new tab.
+      Detected by context.on("page", ...) which fires immediately on tab creation.
 
     Returns one of:
         {"status": "ok",     "ats": str, "filled": int, "skipped": int, "errors": int}
@@ -65,6 +68,7 @@ async def run_prefill_session(
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=headless)
             page = await browser.new_page()
+            context = page.context
 
             try:
                 await page.goto(url, wait_until="load", timeout=30000)
@@ -115,12 +119,41 @@ async def run_prefill_session(
                 await _do_fill(active_page, profile, job, result)
                 filled_ats.add(ats)
 
-            # Keep browser open — wait for user to close it.
-            # Concurrently watch for navigation to any ATS page so we can fill
-            # automatically even if the user navigated there manually.
+            # ----------------------------------------------------------------
+            # Keep browser open; watch for two navigation patterns:
+            #
+            # 1. NEW TAB — user or automation opens ATS in a new tab
+            #    (target="_blank" links, e.g. euremotejobs → Ashby).
+            #    Handled by context.on("page", ...) which fires immediately.
+            #
+            # 2. SAME TAB — page navigates in place (Lever, Greenhouse, etc.).
+            #    Handled by the polling watcher task.
+            # ----------------------------------------------------------------
             closed_event = asyncio.Event()
             active_page.on("close", lambda: closed_event.set())
             browser.on("disconnected", lambda: closed_event.set())
+
+            loop = asyncio.get_event_loop()
+
+            async def _fill_new_tab(new_page) -> None:
+                """Fill a newly-opened browser tab if it's an ATS application page."""
+                try:
+                    await new_page.wait_for_load_state("load", timeout=20000)
+                    await _wait_for_spa(new_page)
+                    tab_ats = detect_ats(new_page.url)
+                    if tab_ats in MANUAL_ONLY_ATS or tab_ats == "unknown":
+                        return
+                    if tab_ats in filled_ats:
+                        return
+                    result["ats"] = tab_ats
+                    await _do_fill(new_page, profile, job, result)
+                    filled_ats.add(tab_ats)
+                    # Closing this tab ends the session too.
+                    new_page.on("close", lambda: closed_event.set())
+                except Exception:
+                    pass
+
+            context.on("page", lambda p: loop.create_task(_fill_new_tab(p)))
 
             watch_task = asyncio.create_task(
                 _watch_for_ats_and_fill(active_page, profile, job, result, closed_event, filled_ats)
@@ -182,12 +215,10 @@ async def _watch_for_ats_and_fill(
     filled_ats: Set[str],
     poll_interval: float = 1.5,
 ) -> None:
-    """Poll the page URL every poll_interval seconds.
+    """Poll page.url every poll_interval seconds for same-tab ATS navigation.
 
-    When it detects navigation to a new ATS application page (one we haven't
-    filled yet), waits for the SPA to render then fills the form.  This handles
-    the common case where the user manually clicks an "Apply" button on a job
-    listing aggregator — the fill fires as soon as they land on the ATS page.
+    Complements the new-tab handler: handles cases where the page navigates
+    in place (Lever, Greenhouse direct links, or automation clicking Apply).
     """
     while not closed_event.is_set():
         await asyncio.sleep(poll_interval)
@@ -199,7 +230,7 @@ async def _watch_for_ats_and_fill(
                 continue
             if current_ats in filled_ats:
                 continue
-            # New ATS page — wait for the SPA to render then fill.
+            # New ATS page detected in this tab — wait for SPA then fill.
             await _wait_for_spa(page)
             result["ats"] = current_ats
             await _do_fill(page, profile, job, result)
