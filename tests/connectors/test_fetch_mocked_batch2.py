@@ -9,6 +9,10 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
 
+_RECENT_PUB_DATE = (
+    datetime.now(tz=timezone.utc) - timedelta(days=3)
+).strftime("%a, %d %b %Y %H:%M:%S +0000")
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -40,8 +44,9 @@ def _rss(items_xml=""):
 
 def _item_et(title="Acme: Backend Engineer",
              guid="https://example.com/job/slug",
-             pub="Mon, 24 Mar 2026 00:00:00 +0000",
+             pub=None,
              description="desc"):
+    pub = pub or _RECENT_PUB_DATE
     """Build stdlib ET item element (link.tail = URL pattern)."""
     item = ET.Element("item")
     t = ET.SubElement(item, "title")
@@ -366,7 +371,7 @@ class TestJobicyFetch:
     def _job(self, job_id=1):
         return {"id": job_id, "jobTitle": "Engineer", "companyName": "Acme",
                 "url": "https://jobicy.com/jobs/1", "jobDescription": "role",
-                "jobGeo": "Worldwide", "pubDate": "Mon, 24 Mar 2026 00:00:00 +0000"}
+                "jobGeo": "Worldwide", "pubDate": _RECENT_PUB_DATE}
 
     def test_returns_jobs(self):
         with patch(self._T, return_value=_mock_json({"jobs": [self._job()]})):
@@ -398,7 +403,7 @@ class TestJobicyNormalize:
     def _raw(self, **kw):
         base = {"id": 1, "jobTitle": "Dev", "companyName": "Co",
                 "url": "https://jobicy.com/1", "jobDescription": "role",
-                "jobGeo": "Worldwide", "pubDate": "Mon, 24 Mar 2026 00:00:00 +0000"}
+                "jobGeo": "Worldwide", "pubDate": _RECENT_PUB_DATE}
         return {**base, **kw}
 
     def test_date_parsed(self):
@@ -431,7 +436,8 @@ class TestRemoteAIJobsFetch:
 
     def _xml_item(self, title="ML Engineer at DeepCo",
                   guid="https://www.realworkfromanywhere.com/remote-ai-jobs/ml-eng",
-                  pub="Mon, 24 Mar 2026 00:00:00 +0000"):
+                  pub=None):
+        pub = pub or _RECENT_PUB_DATE
         return f"""<item>
           <title>{title}</title>
           <guid>{guid}</guid>
@@ -560,7 +566,8 @@ class TestDynamiteJobsFetch:
     _T = "connectors.dynamitejobs.requests.get"
 
     def _item(self, title="Backend Dev", guid="https://dynamitejobs.com/1",
-               pub="Mon, 24 Mar 2026 00:00:00 +0000", author=None):
+               pub=None, author=None):
+        pub = pub or _RECENT_PUB_DATE
         author_tag = f"<author>{author}</author>" if author else ""
         return f"""<item>
           <title>{title}</title>
@@ -626,7 +633,7 @@ class TestDailyRemoteFetch:
           <title>{title}</title>
           <guid>{guid}</guid>
           <description>role</description>
-          <pubDate>Mon, 24 Mar 2026 00:00:00 +0000</pubDate>
+          <pubDate>{_RECENT_PUB_DATE}</pubDate>
         </item>"""
 
     def _feed(self, *items):
@@ -674,7 +681,8 @@ class TestJobspressoFetch:
 
     def _item(self, title="Full Stack Dev at StartupCo",
                guid="https://jobspresso.co/?p=42",
-               pub="Mon, 24 Mar 2026 00:00:00 +0000"):
+               pub=None):
+        pub = pub or _RECENT_PUB_DATE
         return f"""<item>
           <title>{title}</title>
           <guid>{guid}</guid>

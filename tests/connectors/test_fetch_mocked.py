@@ -8,6 +8,10 @@ multi-feed deduplication, and empty/malformed responses.
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
 
+_RECENT_PUB_DATE = (
+    datetime.now(tz=timezone.utc) - timedelta(days=3)
+).strftime("%a, %d %b %Y %H:%M:%S +0000")
+
 
 # ---------------------------------------------------------------------------
 # RSS fixture builders
@@ -25,8 +29,9 @@ def _rss_envelope(items_xml: str) -> bytes:
 
 def _rwfa_item(title="Senior Engineer at Acme",
                url="https://www.realworkfromanywhere.com/jobs/slug-1",
-               pub_date="Mon, 24 Mar 2026 00:00:00 +0000",
+               pub_date=None,
                description="Python role") -> str:
+    pub_date = pub_date or _RECENT_PUB_DATE
     return f"""<item>
       <title>{title}</title>
       <guid>{url}</guid>
@@ -37,8 +42,9 @@ def _rwfa_item(title="Senior Engineer at Acme",
 
 def _eu_item(title="Backend Dev | Acme Corp",
              url="https://euremotejobs.com/job/backend-dev/",
-             pub_date="Mon, 24 Mar 2026 00:00:00 +0000",
+             pub_date=None,
              description="EU remote role") -> str:
+    pub_date = pub_date or _RECENT_PUB_DATE
     return f"""<item>
       <title>{title}</title>
       <link>{url}</link>
@@ -49,7 +55,8 @@ def _eu_item(title="Backend Dev | Acme Corp",
 
 def _wwr_item(title="Acme: Backend Engineer",
               url="https://weworkremotely.com/remote-jobs/acme-backend",
-              pub_date="Mon, 24 Mar 2026 00:00:00 +0000") -> str:
+              pub_date=None) -> str:
+    pub_date = pub_date or _RECENT_PUB_DATE
     # WWR uses link.tail for URL in stdlib ET
     return f"""<item>
       <title>{title}</title>
