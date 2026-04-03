@@ -154,6 +154,17 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
 .btn-open-apply svg{width:14px;height:14px;}
 .apply-confirm{display:none;align-items:center;gap:10px;padding:11px 20px;background:var(--accent-light);border-top:1px solid var(--accent-mid);animation:fadeSlideUp .2s ease;}
 .apply-confirm.show{display:flex;}
+.prefill-status{border-top:1px solid var(--border);background:var(--bg-subtle);padding:10px 16px 8px;font-size:12.5px;}
+.prefill-status-header{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+.prefill-spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--accent-mid);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0;}
+.prefill-spinner.done{border:none;width:auto;height:auto;animation:none;font-size:13px;}
+#prefillStatusTitle{flex:1;font-weight:600;color:var(--text-secondary);}
+.prefill-dismiss{background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;padding:0 2px;line-height:1;}
+.prefill-dismiss:hover{color:var(--text-secondary);}
+.btn-prefill-stop{padding:3px 10px;background:var(--red-light);color:var(--red);border:1px solid var(--red-mid);border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:11.5px;font-weight:600;cursor:pointer;}
+.btn-prefill-stop:hover{background:var(--red);color:#fff;}
+.prefill-log{font-family:'SF Mono','Fira Mono',monospace;font-size:11.5px;color:var(--text-muted);max-height:80px;overflow-y:auto;line-height:1.6;}
+@keyframes spin{to{transform:rotate(360deg);}}
 .apply-confirm-text{flex:1;font-size:13px;font-weight:600;color:var(--text-primary);}
 .btn-applied-yes{padding:7px 14px;background:var(--green);color:#fff;border:none;border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;transition:opacity var(--transition);}
 .btn-applied-yes:hover{opacity:.85;}
@@ -385,6 +396,16 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right:4px"><polyline points="20 6 9 17 4 12"/></svg>Yes, applied
         </button>
         <button class="btn-applied-no" onclick="confirmApplied(false)">Not yet</button>
+      </div>
+      <div class="prefill-status" id="prefillStatus" style="display:none">
+        <div class="prefill-status-header">
+          <span id="prefillStatusIcon" class="prefill-spinner"></span>
+          <span id="prefillStatusTitle">Prefill in progress…</span>
+          <button class="btn-prefill-stop" id="prefillStopBtn" onclick="stopPrefill()" style="display:none">Stop</button>
+          <button class="prefill-dismiss" onclick="dismissPrefillStatus()">✕</button>
+        </div>
+        <div id="prefillSlowWarning" style="display:none;font-size:11.5px;color:var(--red);margin-bottom:4px;">Taking longer than expected.</div>
+        <div class="prefill-log" id="prefillLog"></div>
       </div>
       <div class="action-bar" id="actionBar">
         <button class="btn-triage-action btn-reject" onclick="triageAction('rejected')">
@@ -648,6 +669,74 @@ function copyCover() {
   navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard', 'success'));
 }
 
+// ── Prefill status polling ──────────────────────────────────────────────────
+let _prefillPollTimer = null;
+let _prefillStartTime = null;
+const PREFILL_SLOW_THRESHOLD_MS = 60000;
+
+function _showPrefillStatus(running) {
+  const el = document.getElementById('prefillStatus');
+  if (el) el.style.display = 'block';
+  const icon = document.getElementById('prefillStatusIcon');
+  const title = document.getElementById('prefillStatusTitle');
+  const stopBtn = document.getElementById('prefillStopBtn');
+  const slowWarn = document.getElementById('prefillSlowWarning');
+  if (icon) {
+    icon.className = running ? 'prefill-spinner' : 'prefill-spinner done';
+    if (!running) icon.textContent = '✓';
+  }
+  if (title) title.textContent = running ? 'Prefill in progress…' : 'Prefill complete';
+  if (!running) {
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (slowWarn) slowWarn.style.display = 'none';
+  }
+}
+
+function _updatePrefillLog(lines) {
+  const el = document.getElementById('prefillLog');
+  if (!el) return;
+  el.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function dismissPrefillStatus() {
+  const el = document.getElementById('prefillStatus');
+  if (el) el.style.display = 'none';
+  if (_prefillPollTimer) { clearInterval(_prefillPollTimer); _prefillPollTimer = null; }
+}
+
+async function stopPrefill() {
+  try { await api('/api/prefill/stop', 'POST'); } catch(e) {}
+  const stopBtn = document.getElementById('prefillStopBtn');
+  if (stopBtn) { stopBtn.disabled = true; stopBtn.textContent = 'Stopping…'; }
+}
+
+function _startPrefillPoll() {
+  if (_prefillPollTimer) clearInterval(_prefillPollTimer);
+  _prefillStartTime = Date.now();
+  _showPrefillStatus(true);
+  _prefillPollTimer = setInterval(async () => {
+    try {
+      const s = await api('/api/prefill/status');
+      _updatePrefillLog(s.log || []);
+      const running = s.status === 'running';
+      // Show stop button + slow warning after threshold
+      const elapsed = Date.now() - _prefillStartTime;
+      const stopBtn = document.getElementById('prefillStopBtn');
+      const slowWarn = document.getElementById('prefillSlowWarning');
+      if (running && elapsed > PREFILL_SLOW_THRESHOLD_MS) {
+        if (stopBtn) stopBtn.style.display = '';
+        if (slowWarn) slowWarn.style.display = '';
+      }
+      if (!running) {
+        _showPrefillStatus(false);
+        clearInterval(_prefillPollTimer);
+        _prefillPollTimer = null;
+      }
+    } catch(e) { /* ignore poll errors */ }
+  }, 1500);
+}
+
 async function openApply() {
   const job = jobs[idx];
   if (!job) return;
@@ -661,6 +750,7 @@ async function openApply() {
       return;
     } else {
       showToast('Browser opening with prefill…');
+      _startPrefillPoll();
     }
   } catch(e) {
     window.open(job.url, '_blank');

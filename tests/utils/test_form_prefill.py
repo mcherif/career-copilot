@@ -280,13 +280,16 @@ def test_extract_apply_url_navigates_to_resolved():
             _fire_close(page)
 
         asyncio.create_task(_close_soon())
+        # First detect_ats call is for the listing page (unknown); subsequent
+        # calls are for the resolved Ashby URL.
+        _ats_seq = iter(["unknown"] + ["ashby"] * 10)
         with patch("utils.form_prefill.async_playwright", return_value=pw_cm), \
              patch("utils.form_prefill.extract_apply_url", new_callable=AsyncMock, return_value=resolved_url), \
              patch("utils.form_prefill.try_click_apply", new_callable=AsyncMock, return_value=(False, page)), \
              patch("utils.form_prefill.scan_fields", new_callable=AsyncMock, return_value=[]), \
              patch("utils.form_prefill.fill_form", new_callable=AsyncMock, return_value=[]), \
              patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
-             patch("utils.form_prefill.detect_ats", return_value="ashby"):
+             patch("utils.form_prefill.detect_ats", side_effect=lambda _: next(_ats_seq)):
             return await run_prefill_session(JOB, PROFILE, wait_timeout=5)
 
     result = asyncio.run(_run())

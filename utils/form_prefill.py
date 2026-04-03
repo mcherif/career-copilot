@@ -55,6 +55,7 @@ async def run_prefill_session(
     profile: Dict[str, Any],
     headless: bool = False,
     wait_timeout: float = 3600,
+    cancel_event=None,
 ) -> Dict[str, Any]:
     """
     Open a job URL in Playwright, navigate to the application form,
@@ -86,6 +87,9 @@ async def run_prefill_session(
             filled_urls: Set[str] = set()   # dedup by URL path, not ATS name
             closed_event = asyncio.Event()
             loop = asyncio.get_event_loop()
+
+            def _cancelled() -> bool:
+                return cancel_event is not None and cancel_event.is_set()
 
             # ----------------------------------------------------------------
             # Register the new-tab handler BEFORE navigation so we never miss
@@ -121,12 +125,18 @@ async def run_prefill_session(
                 return {"status": "failed", "error": f"Page load failed: {exc}"}
 
             # Resolve direct apply URL from listing aggregators.
-            # Retry once — the Apply button may be JS-rendered.
+            # Skip if already on a known ATS page or if a child frame is already
+            # an ATS embed (e.g. Greenhouse on employer career sites).
+            # Retry once (with a short wait) only when truly unknown.
             try:
-                resolved = await extract_apply_url(page)
-                if not resolved:
-                    await page.wait_for_timeout(1000)
+                resolved = None
+                if (not _cancelled()
+                        and detect_ats(page.url) == "unknown"
+                        and _frame_ats(page) is None):
                     resolved = await extract_apply_url(page)
+                    if not resolved:
+                        await page.wait_for_timeout(1000)
+                        resolved = await extract_apply_url(page)
                 if resolved and resolved != url:
                     await page.goto(resolved, wait_until="load", timeout=30000)
                     await _wait_for_spa(page)
@@ -156,22 +166,42 @@ async def run_prefill_session(
                 ats = detect_ats(active_page.url)
 
             # Fill whichever page we ended up on if it's an ATS form.
-            if ats not in MANUAL_ONLY_ATS and ats != "unknown":
-                result["ats"] = ats
-                key = _page_key(active_page.url)
-                await _do_fill(active_page, profile, job, result)
-                filled_urls.add(key)
+            # Also fill when the page URL is "unknown" but a child frame belongs
+            # to a known ATS (e.g. Greenhouse embedded on employer career sites).
+            if not _cancelled():
+                if ats in MANUAL_ONLY_ATS:
+                    pass
+                elif ats != "unknown" or _frame_ats(active_page) not in (None, "unknown"):
+                    if ats == "unknown":
+                        ats = _frame_ats(active_page) or "unknown"
+                    result["ats"] = ats
+                    key = _page_key(active_page.url)
+                    await _do_fill(active_page, profile, job, result)
+                    filled_urls.add(key)
 
             # ----------------------------------------------------------------
             # Keep browser open.  The polling watcher handles same-tab
             # navigation; new tabs are handled by the context handler above.
+            # Cancel event also closes the browser immediately.
             # ----------------------------------------------------------------
             active_page.on("close", lambda: closed_event.set())
             browser.on("disconnected", lambda: closed_event.set())
 
+            if _cancelled():
+                closed_event.set()
+
             watch_task = asyncio.create_task(
                 _watch_for_ats_and_fill(active_page, profile, job, result, closed_event, filled_urls)
             )
+
+            # Poll cancel_event every 2s so a stop request closes the browser quickly.
+            async def _poll_cancel():
+                while not closed_event.is_set():
+                    await asyncio.sleep(2)
+                    if _cancelled():
+                        closed_event.set()
+
+            cancel_task = asyncio.create_task(_poll_cancel())
 
             try:
                 await asyncio.wait_for(closed_event.wait(), timeout=wait_timeout)
@@ -179,17 +209,19 @@ async def run_prefill_session(
                 pass
 
             watch_task.cancel()
-            try:
-                await asyncio.wait_for(watch_task, timeout=2)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
+            cancel_task.cancel()
+            for t in (watch_task, cancel_task):
+                try:
+                    await asyncio.wait_for(t, timeout=2)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
 
             try:
                 await browser.close()
             except Exception:
                 pass
 
-            result["status"] = "ok"
+            result["status"] = "cancelled" if _cancelled() else "ok"
             return result
 
     except Exception as exc:
@@ -250,7 +282,12 @@ async def _watch_for_ats_and_fill(
             break
         try:
             current_ats = detect_ats(page.url)
-            if current_ats in MANUAL_ONLY_ATS or current_ats == "unknown":
+            if current_ats in MANUAL_ONLY_ATS:
+                continue
+            # Also detect ATS via child frames (embedded Greenhouse etc.)
+            if current_ats == "unknown":
+                current_ats = _frame_ats(page) or "unknown"
+            if current_ats == "unknown":
                 continue
             key = _page_key(page.url)
             if key in filled_urls:
@@ -261,6 +298,18 @@ async def _watch_for_ats_and_fill(
             filled_urls.add(key)
         except Exception:
             pass
+
+
+def _frame_ats(page) -> str | None:
+    """Return the ATS name detected from any child frame URL, or None."""
+    for frame in page.frames[1:]:
+        url = frame.url or ""
+        if not url or url == "about:blank":
+            continue
+        ats = detect_ats(url)
+        if ats not in (None, "unknown"):
+            return ats
+    return None
 
 
 async def _scan_with_frame_fallback(page):
@@ -301,9 +350,18 @@ async def _scan_with_frame_fallback(page):
 
 
 async def _wait_for_spa(page) -> None:
-    """Wait for a React/SPA page to finish rendering after navigation."""
+    """Wait for a React/SPA page to finish rendering after navigation.
+
+    If the page already has an ATS embed iframe (e.g. Greenhouse on an
+    employer career page), the iframe is already fully loaded at the `load`
+    event, so we skip the expensive networkidle wait and just allow a short
+    React-render buffer.  This saves ~2s on embedded-ATS pages.
+    """
+    if _frame_ats(page) is not None:
+        await page.wait_for_timeout(200)
+        return
     try:
-        await page.wait_for_load_state("networkidle", timeout=5000)
+        await page.wait_for_load_state("networkidle", timeout=3000)
     except Exception:
         pass
-    await page.wait_for_timeout(800)
+    await page.wait_for_timeout(500)

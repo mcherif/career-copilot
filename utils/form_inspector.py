@@ -193,6 +193,7 @@ async def scan_fields(page: Page) -> list[dict]:
                         placeholder,
                         label,
                         required: el.required || false,
+                        role: el.getAttribute('role') || '',
                     };
                 })
                 .filter(Boolean);

@@ -413,19 +413,36 @@ async def generate_cover(job_id: int):
 # Prefill state
 # ---------------------------------------------------------------------------
 
-_prefill: Dict[str, Any] = {"status": "idle", "job_id": None, "result": None}
+_prefill: Dict[str, Any] = {"status": "idle", "job_id": None, "result": None, "log": [], "started_at": None}
 _prefill_lock = threading.Lock()
+_prefill_cancel = threading.Event()
+
+
+def _prefill_log(msg: str) -> None:
+    """Append a timestamped message to the prefill log (thread-safe)."""
+    entry = f"{datetime.utcnow().strftime('%H:%M:%S')} {msg}"
+    with _prefill_lock:
+        _prefill["log"].append(entry)
+    print(entry, flush=True)  # also echo to terminal
 
 
 def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> None:
+    with _prefill_lock:
+        _prefill["log"] = []
+        _prefill["started_at"] = datetime.utcnow().isoformat()
+
+    _prefill_log(f"Starting prefill for: {job_dict.get('title', '')} @ {job_dict.get('company', '')}")
+
     # Auto-generate cover letter if the job doesn't have one yet.
     if not job_dict.get("cover_letter"):
+        _prefill_log("Generating cover letter via LLM…")
         try:
             from utils.cover_letter import generate_cover_letter
             cl_result = generate_cover_letter(job_dict, profile)
             if cl_result.get("status") == "ok":
                 job_dict = dict(job_dict)
                 job_dict["cover_letter"] = cl_result["cover_letter"]
+                _prefill_log("Cover letter generated.")
                 # Persist to DB so it's available in the UI too.
                 session = _Session()
                 try:
@@ -437,15 +454,34 @@ def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> No
                     pass
                 finally:
                     session.close()
-        except Exception:
-            pass
+            else:
+                _prefill_log("Cover letter generation failed — will skip upload.")
+        except Exception as exc:
+            _prefill_log(f"Cover letter error: {exc}")
+    else:
+        _prefill_log("Cover letter already exists — skipping generation.")
 
+    _prefill_log("Launching browser…")
     from utils.form_prefill import run_prefill_session
 
     try:
-        result = asyncio.run(run_prefill_session(job_dict, profile))
+        result = asyncio.run(run_prefill_session(job_dict, profile, cancel_event=_prefill_cancel))
     except Exception as exc:
         result = {"status": "failed", "error": str(exc)}
+
+    st = result.get("status", "")
+    if st == "failed":
+        _prefill_log(f"Prefill failed: {result.get('error', 'unknown error')}")
+    elif st == "manual":
+        _prefill_log(f"Manual: {result.get('reason', 'open in system browser')}")
+    elif st == "cancelled":
+        _prefill_log("Prefill stopped by user.")
+    else:
+        filled = result.get("filled", 0)
+        skipped = result.get("skipped", 0)
+        errors = result.get("errors", 0)
+        ats = result.get("ats", "unknown")
+        _prefill_log(f"Done ({ats}): {filled} filled, {skipped} skipped, {errors} errors.")
 
     with _prefill_lock:
         _prefill["status"] = "done"
@@ -530,6 +566,7 @@ async def open_job(job_id: int):
         _prefill["status"] = "running"
         _prefill["job_id"] = job_id
         _prefill["result"] = None
+    _prefill_cancel.clear()
 
     try:
         with open("profile.yaml", encoding="utf-8") as fh:
@@ -545,3 +582,12 @@ async def open_job(job_id: int):
 async def get_prefill_status():
     with _prefill_lock:
         return dict(_prefill)
+
+
+@app.post("/api/prefill/stop")
+async def stop_prefill():
+    _prefill_cancel.set()
+    with _prefill_lock:
+        if _prefill["status"] == "running":
+            _prefill_log("Stop requested by user.")
+    return {"ok": True}

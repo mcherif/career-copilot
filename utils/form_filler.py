@@ -17,6 +17,7 @@ Design principles
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -62,6 +63,16 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["cover letter"],     lambda p, j: j.get("cover_letter", "")),
     (["gender"],           lambda p, j: p.get("personal", {}).get("gender", "")),
     (["sex"],              lambda p, j: p.get("personal", {}).get("gender", "")),
+    (["race"],             lambda p, j: p.get("personal", {}).get("race", "")),
+    (["ethnicity"],        lambda p, j: p.get("personal", {}).get("race", "")),
+    (["disability"],       lambda p, j: p.get("personal", {}).get("disability", "")),
+    (["veteran"],          lambda p, j: p.get("personal", {}).get("veteran", "")),
+    (["armed forces"],     lambda p, j: p.get("personal", {}).get("veteran", "")),
+    (["military"],         lambda p, j: p.get("personal", {}).get("veteran", "")),
+    (["sexual orientation"], lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
+    (["lgbtq"],            lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
+    (["lgbtqia"],          lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
+    (["2slgbtqia"],        lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
 ]
 
 # Timezone label keyword → profile timezone values that match (lowercase)
@@ -110,6 +121,32 @@ _GENDER_SYNONYMS: dict[str, list[str]] = {
     "male":   ["male", "man", "he/him", "he / him", "m"],
     "female": ["female", "woman", "she/her", "she / her", "f"],
     "other":  ["other", "non-binary", "nonbinary", "prefer not to say", "prefer not"],
+}
+
+# Demographic field synonyms: profile value → option substrings to look for.
+# Each list is searched in order; first match wins.
+_DISABILITY_SYNONYMS: dict[str, list[str]] = {
+    "no":  ["no disability", "i don't have", "i do not have", "not disabled", "no, i"],
+    "yes": ["i have a disability", "yes"],
+}
+_VETERAN_SYNONYMS: dict[str, list[str]] = {
+    "no":  ["not a veteran", "i am not", "no, i", "i don't identify", "not applicable",
+            "no veteran", "civilian", "no"],
+    "yes": ["i am a veteran", "veteran", "yes"],
+}
+_ORIENTATION_SYNONYMS: dict[str, list[str]] = {
+    # On Yes/No LGBTQ+ identity fields, "straight" maps to selecting "No".
+    "straight":  ["heterosexual", "straight", "not lgbtq", "no, i do not", "no"],
+    "gay":       ["gay", "homosexual", "same-sex", "yes"],
+    "bisexual":  ["bisexual", "bi"],
+    "other":     ["other", "prefer not"],
+}
+_RACE_SYNONYMS: dict[str, list[str]] = {
+    "white":    ["white", "caucasian", "european"],
+    "black":    ["black", "african american", "african-american"],
+    "asian":    ["asian"],
+    "hispanic": ["hispanic", "latino", "latina"],
+    "other":    ["other", "multiracial", "two or more"],
 }
 
 # Words that, when combined with a seniority marker, indicate a label is a
@@ -249,6 +286,21 @@ async def fill_form(
                 continue
 
             if not dry_run:
+                # ARIA combobox (react-select etc.): click + pick option.
+                if field.get("role") == "combobox":
+                    try:
+                        chosen = await _select_combobox_option(page, field, value, label_lower)
+                        if chosen:
+                            actions.append({"field": label or f"anon-text-{idx}", "type": "combobox",
+                                            "action": "selected", "value": chosen})
+                        else:
+                            actions.append({"field": label or f"anon-text-{idx}", "type": "combobox",
+                                            "action": "skipped", "value": f"no option matched {value!r}"})
+                    except Exception as e:
+                        actions.append({"field": label or f"anon-text-{idx}", "type": "combobox",
+                                        "action": "error", "value": str(e)})
+                    continue
+
                 try:
                     # Anonymous fields have no id/name/label to locate by;
                     # use placeholder + nth-of-type position instead.
@@ -404,8 +456,16 @@ async def fill_form(
 
         # ---- file inputs ----------------------------------------------
         elif ftype == "file":
+            # Check label, id, and name — Greenhouse uses id='cover_letter'
+            # with a generic label "Attach" so label alone isn't sufficient.
+            _field_id_lower = (field.get("id") or "").lower()
+            _field_name_lower = (field.get("name") or "").lower()
             is_cover_letter_field = any(
                 kw in label_lower for kw in ("cover letter", "cover_letter", "covering letter")
+            ) or any(
+                kw in _field_id_lower for kw in ("cover_letter", "coverletter")
+            ) or any(
+                kw in _field_name_lower for kw in ("cover_letter", "coverletter")
             )
             if is_cover_letter_field:
                 file_path = _resolve_cover_letter_path(profile, job)
@@ -515,9 +575,18 @@ def _effective_label(field: dict, context: str) -> str:
 
 
 def _resolve_text_value(label_lower: str, profile: dict, job: dict) -> str:
-    """Match a normalised label against the text rules and return the value."""
+    """Match a normalised label against the text rules and return the value.
+
+    Single-word keywords are matched as whole words to prevent spurious hits
+    (e.g. "city" substring-matching inside "ethnicity").
+    Multi-word keywords (e.g. "first name") are still matched as substrings.
+    """
+    label_words = set(re.findall(r"\w+", label_lower))
     for keywords, getter in _TEXT_RULES:
-        if all(kw in label_lower for kw in keywords):
+        if all(
+            (kw in label_lower if " " in kw else kw in label_words)
+            for kw in keywords
+        ):
             return getter(profile, job) or ""
     return ""
 
@@ -959,6 +1028,84 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
             doc.add_paragraph(para)
     doc.save(path)
     return path
+
+
+async def _select_combobox_option(
+    page: Page, field: dict, value: str, label_lower: str
+) -> str | None:
+    """Click an ARIA combobox (react-select etc.) and select the best matching option.
+
+    Returns the selected option text on success, or None if no match found.
+    """
+    el = await _locate_field(page, field)
+    if not el:
+        return None
+
+    await el.click()
+    await asyncio.sleep(0.3)
+
+    # Use aria-controls to scope the search to the right listbox.
+    aria_controls = await el.get_attribute("aria-controls") or ""
+
+    opts: list[dict] = await page.evaluate(
+        """(listboxId) => {
+            const lb = listboxId ? document.getElementById(listboxId) : null;
+            const root = lb || document;
+            return Array.from(root.querySelectorAll('[role="option"]'))
+                .filter(o => { const r = o.getBoundingClientRect();
+                               return r.width > 0 && r.height > 0; })
+                .map(o => ({text: o.innerText.trim(), id: o.id}));
+        }""",
+        aria_controls,
+    )
+
+    if not opts:
+        await el.press("Escape")
+        return None
+
+    val_lower = value.lower()
+    opt_texts_lower = [o["text"].lower() for o in opts]
+
+    # 1. Exact case-insensitive match.
+    for i, t in enumerate(opt_texts_lower):
+        if t == val_lower:
+            await page.locator(f'[id="{opts[i]["id"]}"]').first.click()
+            return opts[i]["text"]
+
+    # 2. Demographic synonym match using label-specific dictionaries.
+    _DEMO_SYNONYMS: dict[str, tuple[str, ...]] = {
+        ("gender", "sex"):               (_GENDER_SYNONYMS,),     # type: ignore[dict-item]
+        ("disability",):                 (_DISABILITY_SYNONYMS,),  # type: ignore[dict-item]
+        ("veteran", "armed forces", "military"): (_VETERAN_SYNONYMS,),  # type: ignore[dict-item]
+        ("sexual orientation", "lgbtq", "lgbtqia", "2slgbtqia"): (_ORIENTATION_SYNONYMS,),  # type: ignore[dict-item]
+        ("race", "ethnicity"):           (_RACE_SYNONYMS,),        # type: ignore[dict-item]
+    }
+    synonym_dict = None
+    for label_keys, (sdict,) in _DEMO_SYNONYMS.items():
+        if any(kw in label_lower for kw in label_keys):
+            synonym_dict = sdict
+            break
+
+    if synonym_dict is not None:
+        synonyms = synonym_dict.get(val_lower, [val_lower])
+        for i, t in enumerate(opt_texts_lower):
+            opt_words = set(re.findall(r"\w+", t))
+            # Each synonym entry can be either a whole-word check or a phrase match.
+            if t in synonyms or any(
+                (s in t) if " " in s else (s in opt_words)
+                for s in synonyms
+            ):
+                await page.locator(f'[id="{opts[i]["id"]}"]').first.click()
+                return opts[i]["text"]
+
+    # 3. Substring match (value contained in option or vice versa).
+    for i, t in enumerate(opt_texts_lower):
+        if val_lower in t or t in val_lower:
+            await page.locator(f'[id="{opts[i]["id"]}"]').first.click()
+            return opts[i]["text"]
+
+    await el.press("Escape")
+    return None
 
 
 def _years_label(profile: dict) -> str:
