@@ -355,26 +355,35 @@ async def fill_form(
 
         # ---- file inputs ----------------------------------------------
         elif ftype == "file":
-            resume_path = _resolve_resume_path(profile, job)
-            if resume_path and not dry_run:
+            is_cover_letter_field = any(
+                kw in label_lower for kw in ("cover letter", "cover_letter", "covering letter")
+            )
+            if is_cover_letter_field:
+                file_path = _resolve_cover_letter_path(profile, job)
+                skip_reason = "(no cover letter text available)"
+            else:
+                file_path = _resolve_resume_path(profile, job)
+                skip_reason = "(no resume path resolved)"
+
+            if file_path and not dry_run:
                 try:
                     el = await _locate_field(page, field)
                     if el:
-                        await el.set_input_files(resume_path)
+                        await el.set_input_files(file_path)
                         actions.append({"field": label or fname, "type": "file",
-                                        "action": "uploaded", "value": resume_path})
+                                        "action": "uploaded", "value": file_path})
                     else:
                         actions.append({"field": label or fname, "type": "file",
                                         "action": "error", "value": "element not found"})
                 except Exception as e:
                     actions.append({"field": label or fname, "type": "file",
                                     "action": "error", "value": str(e)})
-            elif resume_path and dry_run:
+            elif file_path and dry_run:
                 actions.append({"field": label or fname, "type": "file",
-                                "action": "uploaded", "value": resume_path})
+                                "action": "uploaded", "value": file_path})
             else:
                 actions.append({"field": label or fname, "type": "file",
-                                "action": "skipped", "value": "(no resume path resolved)"})
+                                "action": "skipped", "value": skip_reason})
 
     return actions
 
@@ -836,6 +845,38 @@ def _resolve_resume_path(profile: dict, job: dict) -> str:
                 return path
 
     return best_path
+
+
+def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
+    """Write the job's cover letter text to a temp DOCX file and return its path.
+
+    Returns '' if no cover letter text is available on the job dict.
+    The file is written to the system temp dir and reused across calls for
+    the same company (filename is stable so Playwright can upload it).
+    """
+    import os
+    import tempfile
+
+    text = ((job or {}).get("cover_letter") or "").strip()
+    if not text:
+        return ""
+
+    try:
+        from docx import Document  # python-docx
+    except ImportError:
+        return ""
+
+    company_slug = re.sub(r"[^\w-]", "_", ((job or {}).get("company") or "company"))
+    fname = f"cover_letter_{company_slug}.docx"
+    path = os.path.join(tempfile.gettempdir(), fname)
+
+    doc = Document()
+    for para in text.split("\n\n"):
+        para = para.strip()
+        if para:
+            doc.add_paragraph(para)
+    doc.save(path)
+    return path
 
 
 def _years_label(profile: dict) -> str:
