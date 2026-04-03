@@ -50,11 +50,9 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["salary"],       lambda p, j: p.get("preferences", {}).get("rate", "")),
     (["rate"],         lambda p, j: p.get("preferences", {}).get("rate", "")),
     (["compensation"], lambda p, j: p.get("preferences", {}).get("rate", "")),
-    # Freeform fields — filled from the pre-generated cover letter if available.
+    # Cover letter field — use the pre-generated cover letter.
+    # Other freeform/motivational textareas get LLM-generated answers at fill-time.
     (["cover letter"],     lambda p, j: j.get("cover_letter", "")),
-    (["motivation"],       lambda p, j: j.get("cover_letter", "")),
-    (["why do you want"],  lambda p, j: j.get("cover_letter", "")),
-    (["tell us about"],    lambda p, j: j.get("cover_letter", "")),
 ]
 
 # Timezone label keyword → profile timezone values that match (lowercase)
@@ -135,6 +133,34 @@ async def fill_form(
     # Build DOM context for anonymous fields once (expensive JS call).
     context_map = await _build_context_map(page, fields)
 
+    # Identify freeform question fields and pre-generate LLM answers so
+    # every question on the form gets a tailored, role-specific response.
+    llm_answers: dict[int, str] = {}
+    if not dry_run:
+        from utils.form_answers import generate_answers, is_llm_question
+
+        question_batch: list[tuple[int, str]] = []
+        for i, f in enumerate(fields):
+            ftype_i = f["type"]
+            if ftype_i not in ("textarea", "text", "url"):
+                continue
+            lbl_i = _effective_label(f, context_map.get(i, ""))
+            ctx_i = context_map.get(i, "")
+            # Combine context + label for richer question text (e.g. "What
+            # about n8n... Motivation").  Prefer the longer / more specific.
+            question_text = ctx_i if len(ctx_i) > len(lbl_i) else lbl_i
+            if len(question_text) < 12:
+                continue
+            lbl_check = (f"{ctx_i} {lbl_i}".strip() if ctx_i else lbl_i).lower()
+            # Skip if standard rules already produce a value for this field.
+            if _resolve_text_value(lbl_check, profile, job):
+                continue
+            if is_llm_question(lbl_check, ftype_i):
+                question_batch.append((i, question_text))
+
+        if question_batch:
+            llm_answers = await generate_answers(question_batch, job, profile)
+
     # Track text fields that have no meaningful identifier (including those
     # with generic placeholders like "Your answer") so we can fill by position.
     def _is_anonymous_text(f: dict) -> bool:
@@ -178,6 +204,14 @@ async def fill_form(
             # (e.g. placeholder="https://www.linkedin.com/in/..." → linkedin rule).
             if not value and ph_lower and ph_lower not in _GENERIC_PLACEHOLDERS:
                 value = _resolve_text_value(ph_lower, profile, job)
+
+            # Fallback: use LLM-generated answer for freeform question fields.
+            if not value and idx in llm_answers:
+                value = llm_answers[idx]
+
+            # Last resort for textareas: cover letter (better than nothing).
+            if not value and ftype == "textarea" and job.get("cover_letter"):
+                value = job["cover_letter"]
 
             # For anonymous/generic fields fall back to position heuristic.
             if value == "" and idx in anon_text_position:
