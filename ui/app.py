@@ -4,6 +4,7 @@ Career Copilot — local web UI (FastAPI).
 Start via:  python run_pipeline.py ui
 Or directly: uvicorn ui.app:app --port 7860
 """
+import asyncio
 import json
 import subprocess
 import sys
@@ -12,9 +13,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
+import yaml
+
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    from apscheduler.triggers.interval import IntervalTrigger
+except ImportError:  # pragma: no cover — apscheduler optional at import time
+    BackgroundScheduler = None  # type: ignore[assignment,misc]
+    CronTrigger = None  # type: ignore[assignment]
+    IntervalTrigger = None  # type: ignore[assignment]
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -144,7 +152,7 @@ def _update_steps_from_log(line: str):
 _SCHEDULE_PATH = Path(__file__).parent.parent / "ui_schedule.json"
 _DEFAULT_SCHEDULE: Dict[str, Any] = {"mode": "off", "interval_hours": 4, "times": []}
 _sched_config: Dict[str, Any] = dict(_DEFAULT_SCHEDULE)
-_scheduler = BackgroundScheduler(timezone="UTC")
+_scheduler = BackgroundScheduler(timezone="UTC") if BackgroundScheduler else None
 
 
 def _load_sched_config() -> None:
@@ -168,6 +176,8 @@ def _scheduled_run() -> None:
 
 
 def _apply_schedule() -> None:
+    if not _scheduler:
+        return
     _scheduler.remove_all_jobs()
     mode = _sched_config.get("mode", "off")
     if mode == "interval":
@@ -183,6 +193,8 @@ def _apply_schedule() -> None:
 
 
 def _next_run_iso() -> str:
+    if not _scheduler:
+        return ""
     runs = [j.next_run_time for j in _scheduler.get_jobs() if j.next_run_time]
     return min(runs).isoformat() if runs else ""
 
@@ -206,12 +218,13 @@ def _read_task_scheduler() -> Dict[str, Any]:
 def _on_startup() -> None:
     _load_sched_config()
     _apply_schedule()
-    _scheduler.start()
+    if _scheduler:
+        _scheduler.start()
 
 
 @app.on_event("shutdown")
 def _on_shutdown() -> None:
-    if _scheduler.running:
+    if _scheduler and _scheduler.running:
         _scheduler.shutdown(wait=False)
 
 
@@ -397,6 +410,27 @@ async def generate_cover(job_id: int):
 
 
 # ---------------------------------------------------------------------------
+# Prefill state
+# ---------------------------------------------------------------------------
+
+_prefill: Dict[str, Any] = {"status": "idle", "job_id": None, "result": None}
+_prefill_lock = threading.Lock()
+
+
+def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> None:
+    from utils.form_prefill import run_prefill_session
+
+    try:
+        result = asyncio.run(run_prefill_session(job_dict, profile))
+    except Exception as exc:
+        result = {"status": "failed", "error": str(exc)}
+
+    with _prefill_lock:
+        _prefill["status"] = "done"
+        _prefill["result"] = result
+
+
+# ---------------------------------------------------------------------------
 # Routes — pipeline
 # ---------------------------------------------------------------------------
 
@@ -445,3 +479,47 @@ async def set_schedule(body: ScheduleConfig):
     _apply_schedule()
     _save_sched_config()
     return {"ok": True, "next_run": _next_run_iso(), **_sched_config}
+
+
+# ---------------------------------------------------------------------------
+# Routes — open / prefill
+# ---------------------------------------------------------------------------
+
+@app.post("/api/jobs/{job_id}/open")
+async def open_job(job_id: int):
+    from utils.form_prefill import is_system_browser_domain
+
+    session = _Session()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            raise HTTPException(404, f"Job {job_id} not found")
+        job_dict = _job_to_dict(job)
+    finally:
+        session.close()
+
+    # Bot-protected domains: tell the UI to open in system browser directly.
+    if is_system_browser_domain(job_dict.get("url", "")):
+        return {"ok": True, "system_browser": True, "url": job_dict.get("url", "")}
+
+    with _prefill_lock:
+        if _prefill["status"] == "running":
+            return {"ok": False, "message": "A prefill session is already running"}
+        _prefill["status"] = "running"
+        _prefill["job_id"] = job_id
+        _prefill["result"] = None
+
+    try:
+        with open("profile.yaml", encoding="utf-8") as fh:
+            profile = yaml.safe_load(fh) or {}
+    except Exception:
+        profile = {}
+
+    threading.Thread(target=_run_prefill_thread, args=(job_dict, profile), daemon=True).start()
+    return {"ok": True, "system_browser": False, "message": "Browser opening…"}
+
+
+@app.get("/api/prefill/status")
+async def get_prefill_status():
+    with _prefill_lock:
+        return dict(_prefill)

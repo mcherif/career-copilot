@@ -648,15 +648,28 @@ function copyCover() {
   navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard', 'success'));
 }
 
-function openApply() {
+async function openApply() {
   const job = jobs[idx];
-  if (job && job.url) {
+  if (!job) return;
+  try {
+    const r = await api(`/api/jobs/${job.id}/open`, 'POST');
+    if (r.system_browser) {
+      window.open(r.url || job.url, '_blank');
+      showToast('Opened in browser (bot-protected site)');
+    } else if (!r.ok) {
+      showToast(r.message || 'Could not open job', 'error');
+      return;
+    } else {
+      showToast('Browser opening with prefill…');
+    }
+  } catch(e) {
     window.open(job.url, '_blank');
-    const banner = document.getElementById('applyConfirm');
-    banner.classList.remove('show');
-    void banner.offsetWidth;
-    banner.classList.add('show');
+    showToast('Prefill unavailable — opened in browser', 'error');
   }
+  const banner = document.getElementById('applyConfirm');
+  banner.classList.remove('show');
+  void banner.offsetWidth;
+  banner.classList.add('show');
 }
 
 async function confirmApplied(didApply) {
