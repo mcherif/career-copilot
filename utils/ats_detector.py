@@ -6,6 +6,7 @@ ATS_PATTERNS = {
     "smartrecruiters": ["smartrecruiters.com"],
     "notion": ["notion.so", "notion.site"],
     "recruitee": ["recruitee.com"],
+    "comeet": ["comeet.com", "app.comeet.co"],
     "ateam": ["a.team", "onboarding.a.team"],
 }
 
