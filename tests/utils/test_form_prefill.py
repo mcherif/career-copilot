@@ -263,8 +263,8 @@ def test_apply_button_clicked_triggers_timeout_wait():
 
     result = asyncio.run(_run())
     assert result["status"] == "ok"
-    # _wait_for_spa is called after initial nav and after click; each uses 1500 ms.
-    page.wait_for_timeout.assert_any_call(1500)
+    # _wait_for_spa is called after initial nav and after click; each uses 2000 ms.
+    page.wait_for_timeout.assert_any_call(2000)
     assert page.wait_for_timeout.call_count >= 2
 
 
@@ -438,7 +438,7 @@ def test_watcher_fills_after_user_navigates_to_ats():
         return "unknown" if detect_calls[0] <= 1 else "ashby"
 
     result: dict = {"filled": 0, "skipped": 0, "errors": 0}
-    filled_ats: set = set()
+    filled_urls: set = set()
     closed_event = asyncio.Event()
 
     async def _run():
@@ -452,7 +452,7 @@ def test_watcher_fills_after_user_navigates_to_ats():
              patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
              patch("utils.form_prefill.detect_ats", side_effect=_detect):
             await _watch_for_ats_and_fill(
-                page, PROFILE, JOB, result, closed_event, filled_ats, poll_interval=0.05
+                page, PROFILE, JOB, result, closed_event, filled_urls, poll_interval=0.05
             )
 
     asyncio.run(_run())

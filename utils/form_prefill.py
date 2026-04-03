@@ -2,12 +2,12 @@
 Playwright-based form prefill utility for the web UI.
 
 Called from ui/app.py when the user clicks "Open & Prefill".
-Extracted from the open-job CLI command so it can be tested independently.
 """
 from __future__ import annotations
 
 import asyncio
 from typing import Any, Dict, Set
+from urllib.parse import urlparse, urlunparse
 
 from playwright.async_api import async_playwright  # noqa: F401 — imported for patching
 from utils.ats_detector import MANUAL_ONLY_ATS, detect_ats
@@ -15,7 +15,6 @@ from utils.form_filler import fill_form, try_upload_resume
 from utils.form_inspector import extract_apply_url, scan_fields, try_click_apply
 
 # Domains where Playwright is blocked by bot detection.
-# These must be opened in the user's system browser instead.
 SYSTEM_BROWSER_DOMAINS = {
     "remoteok.com",
     "weworkremotely.com",
@@ -31,6 +30,26 @@ def is_system_browser_domain(url: str) -> bool:
     return any(domain in url_lower for domain in SYSTEM_BROWSER_DOMAINS)
 
 
+def _ashby_application_url(url: str) -> str:
+    """Return the Ashby /application URL for a given job listing URL.
+
+    Inserts '/application' into the URL path before the query string so
+    that query parameters (UTM tags etc.) are preserved correctly.
+    """
+    parsed = urlparse(url)
+    new_path = parsed.path.rstrip("/") + "/application"
+    return urlunparse(parsed._replace(path=new_path))
+
+
+def _page_key(url: str) -> str:
+    """Normalised URL used as a dedup key — strips query string."""
+    try:
+        p = urlparse(url)
+        return f"{p.scheme}://{p.netloc}{p.path}".rstrip("/")
+    except Exception:
+        return url.split("?")[0].rstrip("/")
+
+
 async def run_prefill_session(
     job: Dict[str, Any],
     profile: Dict[str, Any],
@@ -43,16 +62,9 @@ async def run_prefill_session(
 
     Keeps the browser open until the user closes it (or wait_timeout seconds).
 
-    Handles two navigation patterns:
-    - Same-tab: automation or user navigates listing page → ATS form in place.
-      Detected by polling active_page.url every 1.5 s.
-    - New-tab: "Apply" button has target="_blank", Ashby opens in a new tab.
-      Detected by context.on("page", ...) which fires immediately on tab creation.
-
-    Returns one of:
-        {"status": "ok",     "ats": str, "filled": int, "skipped": int, "errors": int}
-        {"status": "manual", "reason": str}   — bot-protected, use system browser
-        {"status": "failed", "error": str}
+    The new-tab handler is registered BEFORE any navigation so that even
+    if the user clicks "Apply" while the automation is still waiting on
+    the listing page, the resulting Ashby tab is caught and filled.
     """
     url = (job.get("url") or "").strip()
     if not url:
@@ -70,6 +82,37 @@ async def run_prefill_session(
             page = await browser.new_page()
             context = page.context
 
+            result: Dict[str, Any] = {"ats": "unknown", "filled": 0, "skipped": 0, "errors": 0}
+            filled_urls: Set[str] = set()   # dedup by URL path, not ATS name
+            closed_event = asyncio.Event()
+            loop = asyncio.get_event_loop()
+
+            # ----------------------------------------------------------------
+            # Register the new-tab handler BEFORE navigation so we never miss
+            # a tab the user opens while the automation is busy waiting.
+            # ----------------------------------------------------------------
+            async def _fill_new_tab(new_page) -> None:
+                try:
+                    await new_page.wait_for_load_state("load", timeout=20000)
+                    await _wait_for_spa(new_page)
+                    tab_ats = detect_ats(new_page.url)
+                    if tab_ats in MANUAL_ONLY_ATS or tab_ats == "unknown":
+                        return
+                    key = _page_key(new_page.url)
+                    if key in filled_urls:
+                        return
+                    result["ats"] = tab_ats
+                    await _do_fill(new_page, profile, job, result)
+                    filled_urls.add(key)
+                    new_page.on("close", lambda: closed_event.set())
+                except Exception:
+                    pass
+
+            context.on("page", lambda p: loop.create_task(_fill_new_tab(p)))
+
+            # ----------------------------------------------------------------
+            # Navigate and attempt to reach the ATS application form.
+            # ----------------------------------------------------------------
             try:
                 await page.goto(url, wait_until="load", timeout=30000)
                 await _wait_for_spa(page)
@@ -78,7 +121,7 @@ async def run_prefill_session(
                 return {"status": "failed", "error": f"Page load failed: {exc}"}
 
             # Resolve direct apply URL from listing aggregators.
-            # Retry once if nothing is found — the button may be JS-rendered.
+            # Retry once — the Apply button may be JS-rendered.
             try:
                 resolved = await extract_apply_url(page)
                 if not resolved:
@@ -99,64 +142,35 @@ async def run_prefill_session(
             except Exception:
                 pass
 
-            # Ashby shortcut: if we're on a job listing page, navigate directly
-            # to the /application path which loads the form immediately.
+            # Ashby shortcut: if on a listing page, go to /application directly.
+            # Uses _ashby_application_url to correctly insert /application into
+            # the path BEFORE any query string (UTM params etc.).
             ats = detect_ats(active_page.url)
             if ats == "ashby" and "/application" not in active_page.url:
-                app_url = active_page.url.rstrip("/") + "/application"
                 try:
+                    app_url = _ashby_application_url(active_page.url)
                     await active_page.goto(app_url, wait_until="load", timeout=20000)
                     await _wait_for_spa(active_page)
                 except Exception:
                     pass
                 ats = detect_ats(active_page.url)
 
-            result: Dict[str, Any] = {"ats": ats, "filled": 0, "skipped": 0, "errors": 0}
-            filled_ats: Set[str] = set()
-
-            # Initial fill on whichever page we landed on.
+            # Fill whichever page we ended up on if it's an ATS form.
             if ats not in MANUAL_ONLY_ATS and ats != "unknown":
+                result["ats"] = ats
+                key = _page_key(active_page.url)
                 await _do_fill(active_page, profile, job, result)
-                filled_ats.add(ats)
+                filled_urls.add(key)
 
             # ----------------------------------------------------------------
-            # Keep browser open; watch for two navigation patterns:
-            #
-            # 1. NEW TAB — user or automation opens ATS in a new tab
-            #    (target="_blank" links, e.g. euremotejobs → Ashby).
-            #    Handled by context.on("page", ...) which fires immediately.
-            #
-            # 2. SAME TAB — page navigates in place (Lever, Greenhouse, etc.).
-            #    Handled by the polling watcher task.
+            # Keep browser open.  The polling watcher handles same-tab
+            # navigation; new tabs are handled by the context handler above.
             # ----------------------------------------------------------------
-            closed_event = asyncio.Event()
             active_page.on("close", lambda: closed_event.set())
             browser.on("disconnected", lambda: closed_event.set())
 
-            loop = asyncio.get_event_loop()
-
-            async def _fill_new_tab(new_page) -> None:
-                """Fill a newly-opened browser tab if it's an ATS application page."""
-                try:
-                    await new_page.wait_for_load_state("load", timeout=20000)
-                    await _wait_for_spa(new_page)
-                    tab_ats = detect_ats(new_page.url)
-                    if tab_ats in MANUAL_ONLY_ATS or tab_ats == "unknown":
-                        return
-                    if tab_ats in filled_ats:
-                        return
-                    result["ats"] = tab_ats
-                    await _do_fill(new_page, profile, job, result)
-                    filled_ats.add(tab_ats)
-                    # Closing this tab ends the session too.
-                    new_page.on("close", lambda: closed_event.set())
-                except Exception:
-                    pass
-
-            context.on("page", lambda p: loop.create_task(_fill_new_tab(p)))
-
             watch_task = asyncio.create_task(
-                _watch_for_ats_and_fill(active_page, profile, job, result, closed_event, filled_ats)
+                _watch_for_ats_and_fill(active_page, profile, job, result, closed_event, filled_urls)
             )
 
             try:
@@ -189,6 +203,14 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
     except Exception:
         fields = []
 
+    if not fields:
+        # React may still be rendering — one retry after a short pause.
+        await page.wait_for_timeout(3000)
+        try:
+            fields = await scan_fields(page)
+        except Exception:
+            fields = []
+
     if fields:
         try:
             actions = await fill_form(page, fields, profile, job)
@@ -212,14 +234,10 @@ async def _watch_for_ats_and_fill(
     job: Dict[str, Any],
     result: Dict[str, Any],
     closed_event: asyncio.Event,
-    filled_ats: Set[str],
+    filled_urls: Set[str],
     poll_interval: float = 1.5,
 ) -> None:
-    """Poll page.url every poll_interval seconds for same-tab ATS navigation.
-
-    Complements the new-tab handler: handles cases where the page navigates
-    in place (Lever, Greenhouse direct links, or automation clicking Apply).
-    """
+    """Poll page.url for same-tab navigation to ATS pages not yet filled."""
     while not closed_event.is_set():
         await asyncio.sleep(poll_interval)
         if closed_event.is_set():
@@ -228,25 +246,21 @@ async def _watch_for_ats_and_fill(
             current_ats = detect_ats(page.url)
             if current_ats in MANUAL_ONLY_ATS or current_ats == "unknown":
                 continue
-            if current_ats in filled_ats:
+            key = _page_key(page.url)
+            if key in filled_urls:
                 continue
-            # New ATS page detected in this tab — wait for SPA then fill.
             await _wait_for_spa(page)
             result["ats"] = current_ats
             await _do_fill(page, profile, job, result)
-            filled_ats.add(current_ats)
+            filled_urls.add(key)
         except Exception:
             pass
 
 
 async def _wait_for_spa(page) -> None:
-    """Wait for a React/SPA page to finish rendering after navigation.
-
-    Uses networkidle (capped at 8 s) then a fixed 1.5 s buffer so that
-    lazily-mounted form components have time to appear in the DOM.
-    """
+    """Wait for a React/SPA page to finish rendering after navigation."""
     try:
-        await page.wait_for_load_state("networkidle", timeout=8000)
+        await page.wait_for_load_state("networkidle", timeout=5000)
     except Exception:
         pass
-    await page.wait_for_timeout(1500)
+    await page.wait_for_timeout(2000)
