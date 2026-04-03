@@ -249,7 +249,9 @@ def test_apply_button_clicked_triggers_timeout_wait():
 
     result = asyncio.run(_run())
     assert result["status"] == "ok"
-    page.wait_for_timeout.assert_called_once_with(2000)
+    # _wait_for_spa is called after initial nav and after click; each uses 1500 ms.
+    page.wait_for_timeout.assert_any_call(1500)
+    assert page.wait_for_timeout.call_count >= 2
 
 
 def test_extract_apply_url_navigates_to_resolved():

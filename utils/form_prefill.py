@@ -65,6 +65,7 @@ async def run_prefill_session(
 
             try:
                 await page.goto(url, wait_until="load", timeout=30000)
+                await _wait_for_spa(page)
             except Exception as exc:
                 await browser.close()
                 return {"status": "failed", "error": f"Page load failed: {exc}"}
@@ -74,7 +75,7 @@ async def run_prefill_session(
                 resolved = await extract_apply_url(page)
                 if resolved and resolved != url:
                     await page.goto(resolved, wait_until="load", timeout=30000)
-                    await page.wait_for_timeout(2000)
+                    await _wait_for_spa(page)
             except Exception:
                 pass
 
@@ -83,11 +84,22 @@ async def run_prefill_session(
             try:
                 clicked, active_page = await try_click_apply(active_page)
                 if clicked:
-                    await active_page.wait_for_timeout(2000)
+                    await _wait_for_spa(active_page)
             except Exception:
                 pass
 
+            # Ashby shortcut: if we're on a job listing page, navigate directly
+            # to the /application path which loads the form immediately.
             ats = detect_ats(active_page.url)
+            if ats == "ashby" and "/application" not in active_page.url:
+                app_url = active_page.url.rstrip("/") + "/application"
+                try:
+                    await active_page.goto(app_url, wait_until="load", timeout=20000)
+                    await _wait_for_spa(active_page)
+                except Exception:
+                    pass
+                ats = detect_ats(active_page.url)
+
             result: Dict[str, Any] = {"ats": ats, "filled": 0, "skipped": 0, "errors": 0}
 
             if ats not in MANUAL_ONLY_ATS:
@@ -132,3 +144,16 @@ async def run_prefill_session(
 
     except Exception as exc:
         return {"status": "failed", "error": str(exc)}
+
+
+async def _wait_for_spa(page) -> None:
+    """Wait for a React/SPA page to finish rendering after navigation.
+
+    Uses networkidle (capped at 8 s) then a fixed 1.5 s buffer so that
+    lazily-mounted form components have time to appear in the DOM.
+    """
+    try:
+        await page.wait_for_load_state("networkidle", timeout=8000)
+    except Exception:
+        pass
+    await page.wait_for_timeout(1500)

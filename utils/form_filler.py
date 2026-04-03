@@ -50,11 +50,11 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["salary"],       lambda p, j: p.get("preferences", {}).get("rate", "")),
     (["rate"],         lambda p, j: p.get("preferences", {}).get("rate", "")),
     (["compensation"], lambda p, j: p.get("preferences", {}).get("rate", "")),
-    # Skip fields that need freeform LLM-generated content
-    (["cover letter"],     lambda p, j: ""),
-    (["motivation"],       lambda p, j: ""),
-    (["why do you want"],  lambda p, j: ""),
-    (["tell us about"],    lambda p, j: ""),
+    # Freeform fields — filled from the pre-generated cover letter if available.
+    (["cover letter"],     lambda p, j: j.get("cover_letter", "")),
+    (["motivation"],       lambda p, j: j.get("cover_letter", "")),
+    (["why do you want"],  lambda p, j: j.get("cover_letter", "")),
+    (["tell us about"],    lambda p, j: j.get("cover_letter", "")),
 ]
 
 # Timezone label keyword → profile timezone values that match (lowercase)

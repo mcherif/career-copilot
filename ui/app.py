@@ -418,6 +418,28 @@ _prefill_lock = threading.Lock()
 
 
 def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> None:
+    # Auto-generate cover letter if the job doesn't have one yet.
+    if not job_dict.get("cover_letter"):
+        try:
+            from utils.cover_letter import generate_cover_letter
+            cl_result = generate_cover_letter(job_dict, profile)
+            if cl_result.get("status") == "ok":
+                job_dict = dict(job_dict)
+                job_dict["cover_letter"] = cl_result["cover_letter"]
+                # Persist to DB so it's available in the UI too.
+                session = _Session()
+                try:
+                    db_job = session.query(Job).filter(Job.id == job_dict["id"]).first()
+                    if db_job:
+                        db_job.cover_letter = cl_result["cover_letter"]
+                        session.commit()
+                except Exception:
+                    pass
+                finally:
+                    session.close()
+        except Exception:
+            pass
+
     from utils.form_prefill import run_prefill_session
 
     try:
