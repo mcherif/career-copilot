@@ -53,6 +53,8 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     # Cover letter field — use the pre-generated cover letter.
     # Other freeform/motivational textareas get LLM-generated answers at fill-time.
     (["cover letter"],     lambda p, j: j.get("cover_letter", "")),
+    (["gender"],           lambda p, j: p.get("personal", {}).get("gender", "")),
+    (["sex"],              lambda p, j: p.get("personal", {}).get("gender", "")),
 ]
 
 # Timezone label keyword → profile timezone values that match (lowercase)
@@ -95,6 +97,13 @@ _COMFORT_PREFER_HIGH = [
 # the same as having no placeholder at all.
 _GENERIC_PLACEHOLDERS = {"your answer", "type your answer", "enter your answer",
                          "write here", "...", "answer"}
+
+# Gender value → candidate option texts (lowercase) in order of preference.
+_GENDER_SYNONYMS: dict[str, list[str]] = {
+    "male":   ["male", "man", "he/him", "he / him", "m"],
+    "female": ["female", "woman", "she/her", "she / her", "f"],
+    "other":  ["other", "non-binary", "nonbinary", "prefer not to say", "prefer not"],
+}
 
 # Words that, when combined with a seniority marker, indicate a label is a
 # job-title option (e.g. "Sr. Firmware Engineer") rather than a skills or
@@ -330,14 +339,31 @@ async def fill_form(
                             try:
                                 await el.select_option(value=value)
                             except Exception:
-                                # Partial match: find an option containing the value.
+                                        # Partial match or gender-synonym match.
                                 options = await el.query_selector_all("option")
-                                for opt in options:
-                                    text = (await opt.inner_text()).strip()
-                                    if value.lower() in text.lower():
-                                        opt_val = await opt.get_attribute("value") or text
-                                        await el.select_option(value=opt_val)
+                                opt_texts = [(await o.inner_text()).strip() for o in options]
+                                opt_vals  = [await o.get_attribute("value") or t
+                                             for o, t in zip(options, opt_texts)]
+                                chosen_val = None
+                                # 1. Simple partial match (e.g. "male" in "Male").
+                                for t, v in zip(opt_texts, opt_vals):
+                                    if value.lower() in t.lower():
+                                        chosen_val = v
                                         break
+                                # 2. Gender synonym match (e.g. "male" → "Man", "He/Him").
+                                if not chosen_val and any(
+                                    kw in label_lower for kw in ("gender", "sex")
+                                ):
+                                    synonyms = _GENDER_SYNONYMS.get(value.lower(), [])
+                                    for syn in synonyms:
+                                        for t, v in zip(opt_texts, opt_vals):
+                                            if syn == t.lower():
+                                                chosen_val = v
+                                                break
+                                        if chosen_val:
+                                            break
+                                if chosen_val:
+                                    await el.select_option(value=chosen_val)
                         actions.append({"field": label or fname, "type": "select",
                                         "action": "selected", "value": value})
                     else:
@@ -549,6 +575,15 @@ def _pick_radio(
         return None
 
     profile_tz = (profile.get("personal", {}).get("timezone") or "").lower()
+    profile_gender = (profile.get("personal", {}).get("gender") or "").lower()
+
+    # Gender / sex question.
+    if any(kw in question_label for kw in ("gender", "sex")):
+        synonyms = _GENDER_SYNONYMS.get(profile_gender, [profile_gender])
+        for i, opt in enumerate(option_labels):
+            if any(syn == opt.lower() or syn in opt.lower() for syn in synonyms):
+                return i
+        return None
 
     # Timezone question.
     if "timezone" in question_label or "utc" in " ".join(option_labels[:2]):
