@@ -1300,13 +1300,24 @@ def ui_cmd(port: int, no_browser: bool):
 
     url = f"http://localhost:{port}"
 
-    # If port is already bound, assume another instance is running — just open the browser.
+    # Kill any process already holding the port so we always run the latest code.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _s:
         if _s.connect_ex(("127.0.0.1", port)) == 0:
-            click.echo(f"UI already running at {url} — opening browser.")
-            if not no_browser:
-                webbrowser.open(url)
-            return
+            import psutil
+            killed = False
+            for proc in psutil.process_iter(["pid", "connections"]):
+                try:
+                    for conn in proc.connections(kind="inet"):
+                        if conn.laddr.port == port:
+                            click.echo(f"Killing existing UI process (PID {proc.pid}) on port {port}.")
+                            proc.kill()
+                            proc.wait(timeout=5)
+                            killed = True
+                            break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            if not killed:
+                click.echo(f"Port {port} in use but could not identify process — proceeding anyway.")
 
     if not no_browser:
         webbrowser.open(url)
