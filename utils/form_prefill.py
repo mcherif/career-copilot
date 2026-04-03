@@ -202,7 +202,7 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
 
     if not fields:
         # SPA/iframe may still be rendering — one retry after a short pause.
-        await page.wait_for_timeout(3000)
+        await page.wait_for_timeout(2000)
         fields, fill_target = await _scan_with_frame_fallback(page)
 
     if not fields:
@@ -306,4 +306,4 @@ async def _wait_for_spa(page) -> None:
         await page.wait_for_load_state("networkidle", timeout=5000)
     except Exception:
         pass
-    await page.wait_for_timeout(2000)
+    await page.wait_for_timeout(800)

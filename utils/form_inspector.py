@@ -99,7 +99,7 @@ async def try_click_apply(page: Page) -> tuple[bool, Page]:
     for selector in _APPLY_SELECTORS:
         try:
             locator = page.locator(selector).first
-            if await locator.count() == 0 or not await locator.is_visible(timeout=1500):
+            if await locator.count() == 0 or not await locator.is_visible(timeout=300):
                 continue
 
             # Watch for a new tab opened by target="_blank" links.
@@ -133,82 +133,73 @@ async def scan_fields(page: Page) -> list[dict]:
     Each descriptor is a dict with keys:
         tag, type, name, id, placeholder, label, required
 
-    Filters out Notion's internal editor inputs by ignoring fields that
-    carry no identifying information (name, id, placeholder, aria-label,
-    or a linked <label>).
+    Implemented as a single JS evaluation to avoid the latency of
+    individual per-element async calls (previously ~7 round-trips per field).
     """
-    fields: list[dict] = []
+    try:
+        fields: list[dict] = await page.evaluate("""() => {
+            const sel = [
+                "input:not([type='hidden']):not([type='submit'])" +
+                    ":not([type='button']):not([type='reset']):not([type='image'])",
+                "textarea",
+                "select"
+            ].join(",");
 
-    selectors = [
-        "input:not([type='hidden']):not([type='submit']):not([type='button'])"
-        ":not([type='reset']):not([type='image'])",
-        "textarea",
-        "select",
-    ]
+            function isVisible(el) {
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 && r.height === 0) return false;
+                const s = window.getComputedStyle(el);
+                return s.display !== 'none' && s.visibility !== 'hidden'
+                    && s.opacity !== '0';
+            }
 
-    for selector in selectors:
-        elements = await page.query_selector_all(selector)
-        for el in elements:
-            try:
-                if not await el.is_visible():
-                    continue
+            function getLabel(el, id) {
+                // 1. <label for="id">
+                if (id) {
+                    const lb = document.querySelector('label[for="' + id + '"]');
+                    if (lb) return lb.innerText.trim();
+                }
+                // 2. aria-label
+                const al = el.getAttribute('aria-label');
+                if (al && al.trim()) return al.trim();
+                // 3. aria-labelledby
+                const alb = el.getAttribute('aria-labelledby');
+                if (alb) {
+                    const txt = alb.split(' ')
+                        .map(lid => document.getElementById(lid))
+                        .filter(Boolean)
+                        .map(e => e.innerText.trim())
+                        .filter(Boolean)
+                        .join(' ');
+                    if (txt) return txt;
+                }
+                return '';
+            }
 
-                tag: str = await el.evaluate("el => el.tagName.toLowerCase()")
-                field_type: str = await el.get_attribute("type") or tag
-                name: str = await el.get_attribute("name") or ""
-                field_id: str = await el.get_attribute("id") or ""
-                placeholder: str = await el.get_attribute("placeholder") or ""
-                required: bool = await el.evaluate("el => el.required") or False
-                label_text = ""
-
-                if field_id:
-                    try:
-                        label = await page.query_selector(f"label[for='{field_id}']")
-                        if label:
-                            label_text = (await label.inner_text()).strip()
-                    except Exception:
-                        pass
-
-                # Fall back to aria-label when no <label> element is linked.
-                if not label_text:
-                    label_text = await el.get_attribute("aria-label") or ""
-
-                # Fall back to aria-labelledby (common in React ATSes like Ashby).
-                if not label_text:
-                    labelledby = await el.get_attribute("aria-labelledby") or ""
-                    if labelledby:
-                        try:
-                            texts = []
-                            for lid in labelledby.split():
-                                lel = await page.query_selector(f"#{lid}")
-                                if lel:
-                                    t = (await lel.inner_text()).strip()
-                                    if t:
-                                        texts.append(t)
-                            label_text = " ".join(texts)
-                        except Exception:
-                            pass
-
-                # Skip fully anonymous inputs (e.g. Notion editor divs rendered
-                # as contenteditable that also emit input events).
-                if not any([name, field_id, placeholder, label_text]):
-                    continue
-
-                fields.append(
-                    {
-                        "tag": tag,
-                        "type": field_type,
-                        "name": name,
-                        "id": field_id,
-                        "placeholder": placeholder,
-                        "label": label_text,
-                        "required": required,
-                    }
-                )
-            except Exception:
-                continue
-
-    return fields
+            return Array.from(document.querySelectorAll(sel))
+                .filter(isVisible)
+                .map(el => {
+                    const tag = el.tagName.toLowerCase();
+                    const id  = el.id || '';
+                    const name = el.name || '';
+                    const placeholder = el.placeholder || '';
+                    const label = getLabel(el, id);
+                    if (!name && !id && !placeholder && !label) return null;
+                    return {
+                        tag,
+                        type: el.type || tag,
+                        name,
+                        id,
+                        placeholder,
+                        label,
+                        required: el.required || false,
+                    };
+                })
+                .filter(Boolean);
+        }""")
+        return fields or []
+    except Exception:
+        return []
 
 
 def format_field_report(fields: list[dict]) -> str:

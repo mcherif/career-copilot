@@ -467,7 +467,7 @@ async def try_upload_resume(
     for selector in upload_selectors:
         try:
             btn = page.locator(selector).first
-            if await btn.count() == 0 or not await btn.is_visible(timeout=1500):
+            if await btn.count() == 0 or not await btn.is_visible(timeout=300):
                 continue
             async with page.expect_file_chooser(timeout=5000) as fc_info:
                 await btn.click()
