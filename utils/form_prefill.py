@@ -198,22 +198,28 @@ async def run_prefill_session(
 
 async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: Dict[str, Any]) -> None:
     """Scan and fill all form fields on the current page; update result in place."""
-    try:
-        fields = await scan_fields(page)
-    except Exception:
-        fields = []
+    fields, fill_target = await _scan_with_frame_fallback(page)
 
     if not fields:
-        # React may still be rendering — one retry after a short pause.
+        # SPA/iframe may still be rendering — one retry after a short pause.
         await page.wait_for_timeout(3000)
+        fields, fill_target = await _scan_with_frame_fallback(page)
+
+    if not fields:
+        # Form may be gated behind an "Apply" button (e.g. Comeet).
+        # Click it and wait for the apply iframe/form to appear.
         try:
-            fields = await scan_fields(page)
+            clicked, active = await try_click_apply(page)
+            if clicked:
+                target = active if active is not page else page
+                await _wait_for_spa(target)
+                fields, fill_target = await _scan_with_frame_fallback(page)
         except Exception:
-            fields = []
+            pass
 
     if fields:
         try:
-            actions = await fill_form(page, fields, profile, job)
+            actions = await fill_form(fill_target, fields, profile, job)
             result["filled"] += sum(
                 1 for a in actions if a["action"] in ("filled", "checked", "selected")
             )
@@ -223,7 +229,7 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
             pass
 
     try:
-        await try_upload_resume(page, profile, job)
+        await try_upload_resume(fill_target, profile, job)
     except Exception:
         pass
 
@@ -255,6 +261,35 @@ async def _watch_for_ats_and_fill(
             filled_urls.add(key)
         except Exception:
             pass
+
+
+async def _scan_with_frame_fallback(page):
+    """Scan the page and its child frames for form fields.
+
+    Returns (fields, fill_target) where fill_target is the page or the
+    child frame that contained the fields (e.g. Comeet's /apply iframe).
+    """
+    try:
+        fields = await scan_fields(page)
+    except Exception:
+        fields = []
+    if fields:
+        return fields, page
+
+    # Check child frames — some ATSes (e.g. Comeet) embed the application
+    # form inside an iframe on the job listing page.
+    for frame in page.frames[1:]:
+        url = frame.url or ""
+        if not url or url == "about:blank":
+            continue
+        try:
+            frame_fields = await scan_fields(frame)
+            if frame_fields:
+                return frame_fields, frame
+        except Exception:
+            pass
+
+    return [], page
 
 
 async def _wait_for_spa(page) -> None:

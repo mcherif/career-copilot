@@ -29,6 +29,13 @@ from playwright.async_api import Page
 # The FIRST rule whose keywords all appear in the normalised label wins.
 # ---------------------------------------------------------------------------
 _TEXT_RULES: list[tuple[list[str], Any]] = [
+    # First/last name rules must come before the generic "name" rule.
+    (["first name"],   lambda p, j: (p.get("personal", {}).get("name", "") or "").split()[0]),
+    (["firstname"],    lambda p, j: (p.get("personal", {}).get("name", "") or "").split()[0]),
+    (["first_name"],   lambda p, j: (p.get("personal", {}).get("name", "") or "").split()[0]),
+    (["last name"],    lambda p, j: " ".join((p.get("personal", {}).get("name", "") or "").split()[1:])),
+    (["lastname"],     lambda p, j: " ".join((p.get("personal", {}).get("name", "") or "").split()[1:])),
+    (["last_name"],    lambda p, j: " ".join((p.get("personal", {}).get("name", "") or "").split()[1:])),
     (["name"],         lambda p, j: p.get("personal", {}).get("name", "")),
     (["email"],        lambda p, j: p.get("personal", {}).get("email", "")),
     (["phone"],        lambda p, j: p.get("personal", {}).get("phone", "")),
@@ -201,6 +208,12 @@ async def fill_form(
             label_lower = f"{ctx} {label}".lower()
         else:
             label_lower = label.lower()
+        # If label is still empty, fall back to the field name attribute.
+        # This handles ATSes like Comeet that have no <label> elements but
+        # use descriptive name= values (firstName, lastName, linkedin, etc.)
+        _fname_attr = field.get("name") or ""
+        if not label_lower and _fname_attr:
+            label_lower = _fname_attr.lower()
         # If the label is still too vague, also try the raw placeholder.
         ph_lower = (field.get("placeholder") or "").lower()
         ftype = field["type"]
