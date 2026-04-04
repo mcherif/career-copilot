@@ -3,6 +3,7 @@ ATS_PATTERNS = {
     "lever": ["lever.co"],
     "workday": ["workday.com", "myworkdayjobs.com"],
     "ashby": ["ashbyhq.com"],
+    "workable": ["workable.com"],
     "smartrecruiters": ["smartrecruiters.com"],
     "notion": ["notion.so", "notion.site"],
     "recruitee": ["recruitee.com"],

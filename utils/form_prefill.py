@@ -180,6 +180,20 @@ async def run_prefill_session(
                     pass
                 ats = detect_ats(active_page.url)
 
+            # Workable shortcut: listing page is apply.workable.com/{co}/j/{id}
+            # and the form is at apply.workable.com/{co}/j/{id}/apply/
+            if ats == "workable" and "/apply" not in active_page.url:
+                try:
+                    parsed = urlparse(active_page.url)
+                    apply_path = parsed.path.rstrip("/") + "/apply/"
+                    apply_url = urlunparse(parsed._replace(path=apply_path, query=""))
+                    _log(f"Workable shortcut → {apply_url}")
+                    await active_page.goto(apply_url, wait_until="load", timeout=20000)
+                    await _wait_for_spa(active_page)
+                except Exception:
+                    pass
+                ats = detect_ats(active_page.url)
+
             # Fill whichever page we ended up on if it's an ATS form.
             # Also fill when the page URL is "unknown" but a child frame belongs
             # to a known ATS (e.g. Greenhouse embedded on employer career sites).
