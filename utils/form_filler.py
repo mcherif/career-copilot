@@ -301,8 +301,11 @@ async def fill_form(
             if not value and idx in llm_answers:
                 value = llm_answers[idx]
 
-            # Last resort for textareas: cover letter (better than nothing).
-            if not value and ftype == "textarea" and job.get("cover_letter"):
+            # Last resort for cover-letter-labelled textareas only.
+            # Do NOT fall back to cover letter for arbitrary question textareas
+            # (e.g. "How many years of experience with Golang?").
+            if (not value and ftype == "textarea" and job.get("cover_letter")
+                    and any(kw in label_lower for kw in ("cover letter", "cover_letter", "covering letter"))):
                 value = job["cover_letter"]
 
             # For anonymous/generic fields fall back to position heuristic.
