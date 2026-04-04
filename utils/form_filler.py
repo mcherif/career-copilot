@@ -53,8 +53,9 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["years"],        lambda p, j: _years_label(p)),
     (["start"],        lambda p, j: _years_label(p)),
     (["experience"],   lambda p, j: _years_label(p)),
-    (["referral", "hear"],    lambda p, j: "Remotive"),
-    (["how did you find"],    lambda p, j: "Remotive"),
+    (["referral", "hear"],    lambda p, j: p.get("preferences", {}).get("referral_source", "internet search")),
+    (["how did you find"],    lambda p, j: p.get("preferences", {}).get("referral_source", "internet search")),
+    (["hear about"],          lambda p, j: p.get("preferences", {}).get("referral_source", "internet search")),
     (["salary"],       lambda p, j: p.get("preferences", {}).get("rate", "")),
     (["rate"],         lambda p, j: p.get("preferences", {}).get("rate", "")),
     (["compensation"], lambda p, j: p.get("preferences", {}).get("rate", "")),
@@ -73,6 +74,10 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["lgbtq"],            lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
     (["lgbtqia"],          lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
     (["2slgbtqia"],        lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
+    (["person of colour"], lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
+    (["person of color"],  lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
+    (["colour"],           lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
+    (["color"],            lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
 ]
 
 # Timezone label keyword → profile timezone values that match (lowercase)
@@ -147,6 +152,17 @@ _RACE_SYNONYMS: dict[str, list[str]] = {
     "asian":    ["asian"],
     "hispanic": ["hispanic", "latino", "latina"],
     "other":    ["other", "multiracial", "two or more"],
+}
+_COLOUR_SYNONYMS: dict[str, list[str]] = {
+    "no":  ["no, i do not", "no, i don't", "no"],
+    "yes": ["yes, i do", "yes"],
+}
+_REFERRAL_SYNONYMS: dict[str, list[str]] = {
+    "internet search": ["internet", "online search", "search engine", "google", "web search", "job board"],
+    "linkedin":        ["linkedin"],
+    "indeed":          ["indeed"],
+    "referral":        ["referral", "employee referral", "friend", "colleague"],
+    "other":           ["other"],
 }
 
 # Words that, when combined with a seniority marker, indicate a label is a
@@ -398,7 +414,9 @@ async def fill_form(
             handled_groups.add(group_key)
 
         # ---- select dropdowns -----------------------------------------
-        elif ftype == "select":
+        # el.type on a <select> element returns "select-one" or "select-multiple",
+        # not "select" — handle all three to avoid silently skipping native dropdowns.
+        elif ftype in ("select", "select-one", "select-multiple"):
             value = _resolve_text_value(label_lower, profile, job)
             if value and not dry_run:
                 try:
@@ -425,17 +443,27 @@ async def fill_form(
                                     if value.lower() in t.lower():
                                         chosen_val = v
                                         break
-                                # 2. Gender synonym match (e.g. "male" → "Man", "He/Him").
-                                if not chosen_val and any(
-                                    kw in label_lower for kw in ("gender", "sex")
-                                ):
-                                    synonyms = _GENDER_SYNONYMS.get(value.lower(), [])
-                                    for syn in synonyms:
-                                        for t, v in zip(opt_texts, opt_vals):
-                                            if syn == t.lower():
-                                                chosen_val = v
-                                                break
-                                        if chosen_val:
+                                # 2. Demographic synonym match (gender, disability, veteran, etc.)
+                                _SELECT_DEMO_MAP = [
+                                    (("gender", "sex"),                                    _GENDER_SYNONYMS),
+                                    (("disability",),                                      _DISABILITY_SYNONYMS),
+                                    (("veteran", "armed forces", "military"),              _VETERAN_SYNONYMS),
+                                    (("sexual orientation", "lgbtq", "lgbtqia", "2slgbtqia"), _ORIENTATION_SYNONYMS),
+                                    (("race", "ethnicity"),                                _RACE_SYNONYMS),
+                                    (("colour", "color", "person of colour", "person of color"), _COLOUR_SYNONYMS),
+                                    (("hear about", "referral source", "how did you find"), _REFERRAL_SYNONYMS),
+                                ]
+                                if not chosen_val:
+                                    for kw_tuple, sdict in _SELECT_DEMO_MAP:
+                                        if any(kw in label_lower for kw in kw_tuple):
+                                            synonyms = sdict.get(value.lower(), [value.lower()])
+                                            for syn in synonyms:
+                                                for t, v in zip(opt_texts, opt_vals):
+                                                    if syn in t.lower():
+                                                        chosen_val = v
+                                                        break
+                                                if chosen_val:
+                                                    break
                                             break
                                 if chosen_val:
                                     await el.select_option(value=chosen_val)
@@ -475,18 +503,66 @@ async def fill_form(
                 skip_reason = "(no resume path resolved)"
 
             if file_path and not dry_run:
-                try:
-                    el = await _locate_field(page, field)
-                    if el:
-                        await el.set_input_files(file_path)
-                        actions.append({"field": label or fname, "type": "file",
-                                        "action": "uploaded", "value": file_path})
-                    else:
-                        actions.append({"field": label or fname, "type": "file",
-                                        "action": "error", "value": "element not found"})
-                except Exception as e:
+                uploaded = False
+                upload_err = ""
+                fid = field.get("id") or ""
+                # Strategy 1: click the visible sibling button (Greenhouse pattern).
+                # Greenhouse wraps <button>Attach</button> + <label visually-hidden> +
+                # <input visually-hidden> in a div. The button is the real click target
+                # and triggers React's file-chooser handler correctly.
+                if fid and not uploaded:
+                    try:
+                        btn_h = await page.evaluate_handle(
+                            "(id) => { const el = document.getElementById(id); "
+                            "return el && el.parentElement "
+                            "? el.parentElement.querySelector('button') : null; }",
+                            fid,
+                        )
+                        btn = btn_h.as_element() if btn_h else None
+                        if btn and await btn.is_visible():
+                            async with page.expect_file_chooser(timeout=5000) as fc_info:
+                                await btn.click()
+                            fc = await fc_info.value
+                            await fc.set_files(file_path)
+                            uploaded = True
+                    except Exception:
+                        pass
+                # Strategy 2: click a visible <label for="id"> (some ATSes).
+                if fid and not uploaded:
+                    try:
+                        lbl = page.locator(f'label[for="{fid}"]:visible').first
+                        if await lbl.count() > 0:
+                            async with page.expect_file_chooser(timeout=5000) as fc_info:
+                                await lbl.click()
+                            fc = await fc_info.value
+                            await fc.set_files(file_path)
+                            uploaded = True
+                    except Exception:
+                        pass
+                # Strategy 3: direct set_input_files — works for standard visible
+                # inputs and also hidden ones (bypasses visibility via getElementById).
+                if not uploaded:
+                    try:
+                        if fid:
+                            el_h = await page.evaluate_handle(
+                                "id => document.getElementById(id)", fid
+                            )
+                            el = el_h.as_element()
+                        else:
+                            el = await _locate_field(page, field)
+                        if el:
+                            await el.set_input_files(file_path)
+                            uploaded = True
+                        else:
+                            upload_err = "element not found"
+                    except Exception as e:
+                        upload_err = str(e)
+                if uploaded:
                     actions.append({"field": label or fname, "type": "file",
-                                    "action": "error", "value": str(e)})
+                                    "action": "uploaded", "value": file_path})
+                else:
+                    actions.append({"field": label or fname, "type": "file",
+                                    "action": "error", "value": upload_err or "upload failed"})
             elif file_path and dry_run:
                 actions.append({"field": label or fname, "type": "file",
                                 "action": "uploaded", "value": file_path})
@@ -1079,6 +1155,8 @@ async def _select_combobox_option(
         ("veteran", "armed forces", "military"): (_VETERAN_SYNONYMS,),  # type: ignore[dict-item]
         ("sexual orientation", "lgbtq", "lgbtqia", "2slgbtqia"): (_ORIENTATION_SYNONYMS,),  # type: ignore[dict-item]
         ("race", "ethnicity"):           (_RACE_SYNONYMS,),        # type: ignore[dict-item]
+        ("colour", "color", "person of colour", "person of color"): (_COLOUR_SYNONYMS,),  # type: ignore[dict-item]
+        ("hear about", "how did you find", "referral source", "referral"): (_REFERRAL_SYNONYMS,),  # type: ignore[dict-item]
     }
     synonym_dict = None
     for label_keys, (sdict,) in _DEMO_SYNONYMS.items():

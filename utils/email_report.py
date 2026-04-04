@@ -32,7 +32,7 @@ def _build_html(new_jobs: List[Dict[str, Any]], counts: Dict[str, int]) -> str:
             f'<td><span style="background:{badge_color};color:#fff;padding:2px 6px;border-radius:3px;font-size:0.85em;">{status}</span></td>'
             f'<td>{job["title"]}</td>'
             f'<td>{job["company"]}</td>'
-            f'<td style="text-align:right;">{job["fit_score"] or "-"}</td>'
+            f'<td style="text-align:center;">{job["fit_score"] or "-"}</td>'
             f'<td>{job.get("source","")}</td>'
             f'</tr>'
         )
@@ -47,7 +47,7 @@ def _build_html(new_jobs: List[Dict[str, Any]], counts: Dict[str, int]) -> str:
               <th style="padding:6px 8px;text-align:left;">Status</th>
               <th style="padding:6px 8px;text-align:left;">Title</th>
               <th style="padding:6px 8px;text-align:left;">Company</th>
-              <th style="padding:6px 8px;text-align:right;">Score</th>
+              <th style="padding:6px 8px;text-align:center;">Score</th>
               <th style="padding:6px 8px;text-align:left;">Source</th>
             </tr>
           </thead>
