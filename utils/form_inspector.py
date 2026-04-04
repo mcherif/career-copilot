@@ -48,6 +48,14 @@ _LISTING_DOMAINS = [
     "indeed.com",
     "glassdoor.com",
     "levels.fyi",
+    "realworkfromanywhere.com",
+    "jobicy.com",
+    "euremotejobs.com",
+    "dynamitejobs.com",
+    "jobspresso.co",
+    "workingnomads.com",
+    "arcdev.app",
+    "dailyremote.com",
 ]
 
 
@@ -103,8 +111,10 @@ async def try_click_apply(page: Page) -> tuple[bool, Page]:
                 continue
 
             # Watch for a new tab opened by target="_blank" links.
-            async with context.expect_page() as new_page_info:
-                await locator.click()
+            # Timeout capped at 5s — if no new tab opens in that time the
+            # click navigated the current tab instead (handled below).
+            async with context.expect_page(timeout=5000) as new_page_info:
+                await locator.click(timeout=5000)
             new_page = await new_page_info.value
             await new_page.wait_for_load_state("load", timeout=20000)
             return True, new_page
@@ -115,7 +125,7 @@ async def try_click_apply(page: Page) -> tuple[bool, Page]:
             try:
                 locator2 = page.locator(selector).first
                 if await locator2.count() > 0 and await locator2.is_visible(timeout=500):
-                    await locator2.click()
+                    await locator2.click(timeout=5000)
                     try:
                         await page.wait_for_load_state("networkidle", timeout=8000)
                     except Exception:
