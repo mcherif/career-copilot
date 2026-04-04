@@ -57,6 +57,7 @@ async def run_prefill_session(
     headless: bool = False,
     wait_timeout: float = 3600,
     cancel_event=None,
+    log_fn=None,
 ) -> Dict[str, Any]:
     """
     Open a job URL in Playwright, navigate to the application form,
@@ -68,6 +69,13 @@ async def run_prefill_session(
     if the user clicks "Apply" while the automation is still waiting on
     the listing page, the resulting Ashby tab is caught and filled.
     """
+    def _log(msg: str) -> None:
+        if log_fn:
+            try:
+                log_fn(msg)
+            except Exception:
+                pass
+
     url = (job.get("url") or "").strip()
     if not url:
         return {"status": "failed", "error": "No URL for this job"}
@@ -118,6 +126,7 @@ async def run_prefill_session(
             # ----------------------------------------------------------------
             # Navigate and attempt to reach the ATS application form.
             # ----------------------------------------------------------------
+            _log(f"Loading {url} …")
             try:
                 await page.goto(url, wait_until="load", timeout=30000)
                 await _wait_for_spa(page)
@@ -134,13 +143,17 @@ async def run_prefill_session(
                 if (not _cancelled()
                         and detect_ats(page.url) == "unknown"
                         and _frame_ats(page) is None):
+                    _log("Listing page detected — looking for apply link…")
                     resolved = await extract_apply_url(page)
                     if not resolved:
                         await page.wait_for_timeout(1000)
                         resolved = await extract_apply_url(page)
                 if resolved and resolved != url:
+                    _log(f"Following apply link → {resolved[:80]}")
                     await page.goto(resolved, wait_until="load", timeout=30000)
                     await _wait_for_spa(page)
+                elif detect_ats(page.url) == "unknown" and _frame_ats(page) is None:
+                    _log("No direct apply link found — trying Apply button…")
             except Exception:
                 pass
 
@@ -149,6 +162,7 @@ async def run_prefill_session(
             try:
                 clicked, active_page = await try_click_apply(active_page)
                 if clicked:
+                    _log(f"Clicked Apply → {active_page.url[:80]}")
                     await _wait_for_spa(active_page)
             except Exception:
                 pass
@@ -170,15 +184,19 @@ async def run_prefill_session(
             # Also fill when the page URL is "unknown" but a child frame belongs
             # to a known ATS (e.g. Greenhouse embedded on employer career sites).
             if not _cancelled():
+                frame_ats = _frame_ats(active_page)
                 if ats in MANUAL_ONLY_ATS:
-                    pass
-                elif ats != "unknown" or _frame_ats(active_page) not in (None, "unknown"):
+                    _log(f"ATS '{ats}' requires manual application — fill in browser.")
+                elif ats != "unknown" or frame_ats not in (None, "unknown"):
                     if ats == "unknown":
-                        ats = _frame_ats(active_page) or "unknown"
+                        ats = frame_ats or "unknown"
+                    _log(f"ATS detected: {ats} — filling form…")
                     result["ats"] = ats
                     key = _page_key(active_page.url)
                     await _do_fill(active_page, profile, job, result)
                     filled_urls.add(key)
+                else:
+                    _log("No application form detected — browser is open, navigate to the form manually.")
 
             # ----------------------------------------------------------------
             # Keep browser open.  The polling watcher handles same-tab
