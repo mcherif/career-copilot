@@ -510,6 +510,10 @@ async def fill_form(
                 # Greenhouse wraps <button>Attach</button> + <label visually-hidden> +
                 # <input visually-hidden> in a div. The button is the real click target
                 # and triggers React's file-chooser handler correctly.
+                # expect_file_chooser() is a Page method; when fill_target is a
+                # cross-origin Frame (e.g. Greenhouse embed on instacart.careers),
+                # we must use the parent Page to intercept the file chooser.
+                _fc_page = getattr(page, "page", page)
                 if fid and not uploaded:
                     try:
                         btn_h = await page.evaluate_handle(
@@ -520,7 +524,7 @@ async def fill_form(
                         )
                         btn = btn_h.as_element() if btn_h else None
                         if btn and await btn.is_visible():
-                            async with page.expect_file_chooser(timeout=5000) as fc_info:
+                            async with _fc_page.expect_file_chooser(timeout=5000) as fc_info:
                                 await btn.click()
                             fc = await fc_info.value
                             await fc.set_files(file_path)
@@ -532,7 +536,7 @@ async def fill_form(
                     try:
                         lbl = page.locator(f'label[for="{fid}"]:visible').first
                         if await lbl.count() > 0:
-                            async with page.expect_file_chooser(timeout=5000) as fc_info:
+                            async with _fc_page.expect_file_chooser(timeout=5000) as fc_info:
                                 await lbl.click()
                             fc = await fc_info.value
                             await fc.set_files(file_path)
@@ -603,12 +607,13 @@ async def try_upload_resume(
         "button:has-text('Browse')",
     ]
 
+    _fc_page = getattr(page, "page", page)  # Frame → its parent Page
     for selector in upload_selectors:
         try:
             btn = page.locator(selector).first
             if await btn.count() == 0 or not await btn.is_visible(timeout=300):
                 continue
-            async with page.expect_file_chooser(timeout=5000) as fc_info:
+            async with _fc_page.expect_file_chooser(timeout=5000) as fc_info:
                 await btn.click()
             fc = await fc_info.value
             await fc.set_files(resume_path)
