@@ -618,10 +618,12 @@ async def fill_form(
                     # upload before the next field (e.g. cover letter) is attempted.
                     await page.wait_for_timeout(600)
                     actions.append({"field": label or fname, "type": "file",
-                                    "action": "uploaded", "value": file_path})
+                                    "action": "uploaded", "value": file_path,
+                                    "is_cover_letter": is_cover_letter_field})
                 else:
                     actions.append({"field": label or fname, "type": "file",
-                                    "action": "error", "value": upload_err or "upload failed"})
+                                    "action": "error", "value": upload_err or "upload failed",
+                                    "is_cover_letter": is_cover_letter_field})
             elif file_path and dry_run:
                 actions.append({"field": label or fname, "type": "file",
                                 "action": "uploaded", "value": file_path})
@@ -1135,11 +1137,12 @@ def _resolve_resume_path(profile: dict, job: dict) -> str:
 
 
 def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
-    """Write the job's cover letter text to a temp DOCX file and return its path.
+    """Write the job's cover letter text to a temp PDF and return its path.
 
     Returns '' if no cover letter text is available on the job dict.
     The file is written to the system temp dir and reused across calls for
     the same company (filename is stable so Playwright can upload it).
+    Falls back to DOCX if fpdf2 is not installed.
     """
     import os
     import tempfile
@@ -1148,22 +1151,46 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
     if not text:
         return ""
 
-    try:
-        from docx import Document  # python-docx
-    except ImportError:
-        return ""
-
     company_slug = re.sub(r"[^\w-]", "_", ((job or {}).get("company") or "company"))
-    fname = f"cover_letter_{company_slug}.docx"
-    path = os.path.join(tempfile.gettempdir(), fname)
 
-    doc = Document()
-    for para in text.split("\n\n"):
-        para = para.strip()
-        if para:
-            doc.add_paragraph(para)
-    doc.save(path)
-    return path
+    # Prefer PDF (accepted by all major ATSes and has no macro-safety warnings).
+    try:
+        from fpdf import FPDF
+
+        fname = f"cover_letter_{company_slug}.pdf"
+        path = os.path.join(tempfile.gettempdir(), fname)
+        pdf = FPDF()
+        pdf.set_margins(25, 25, 25)
+        pdf.add_page()
+        pdf.set_font("Helvetica", size=11)
+        for para in text.split("\n\n"):
+            para = para.strip()
+            if not para:
+                continue
+            # fpdf2 built-in fonts are Latin-1; replace unmappable chars.
+            safe = para.encode("latin-1", errors="replace").decode("latin-1")
+            pdf.multi_cell(0, 6, safe)
+            pdf.ln(3)
+        pdf.output(path)
+        return path
+    except Exception:
+        pass
+
+    # Fallback: DOCX (python-docx already in requirements).
+    try:
+        from docx import Document
+
+        fname = f"cover_letter_{company_slug}.docx"
+        path = os.path.join(tempfile.gettempdir(), fname)
+        doc = Document()
+        for para in text.split("\n\n"):
+            para = para.strip()
+            if para:
+                doc.add_paragraph(para)
+        doc.save(path)
+        return path
+    except Exception:
+        return ""
 
 
 async def _select_combobox_option(

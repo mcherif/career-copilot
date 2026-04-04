@@ -250,6 +250,7 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
         except Exception:
             pass
 
+    cl_file_uploaded = False
     if fields:
         try:
             actions = await fill_form(fill_target, fields, profile, job)
@@ -261,6 +262,10 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
             result["uploads"] = result.get("uploads", 0) + sum(
                 1 for a in actions if a["action"] == "uploaded"
             )
+            cl_file_uploaded = any(
+                a.get("action") == "uploaded" and a.get("is_cover_letter")
+                for a in actions
+            )
         except Exception:
             pass
 
@@ -269,14 +274,12 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
     except Exception:
         pass
 
-    # Dedicated cover-letter handler — runs regardless of what scan_fields found.
-    # Greenhouse hides the file input (visually-hidden), so scan_fields may miss
-    # it or the file-chooser path fails.  Clicking "Enter manually" and filling
-    # the revealed textarea is the most reliable path.
-    try:
-        await _fill_cover_letter_manually(fill_target, job)
-    except Exception:
-        pass
+    # Fall back to "Enter manually" only when the PDF file upload didn't succeed.
+    if not cl_file_uploaded:
+        try:
+            await _fill_cover_letter_manually(fill_target, job)
+        except Exception:
+            pass
 
 
 async def _watch_for_ats_and_fill(
