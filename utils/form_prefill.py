@@ -6,6 +6,7 @@ Called from ui/app.py when the user clicks "Open & Prefill".
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any, Dict, Set
 from urllib.parse import urlparse, urlunparse
 
@@ -257,11 +258,23 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
             )
             result["skipped"] += sum(1 for a in actions if a["action"] == "skipped")
             result["errors"] += sum(1 for a in actions if a["action"] == "error")
+            result["uploads"] = result.get("uploads", 0) + sum(
+                1 for a in actions if a["action"] == "uploaded"
+            )
         except Exception:
             pass
 
     try:
         await try_upload_resume(fill_target, profile, job)
+    except Exception:
+        pass
+
+    # Dedicated cover-letter handler — runs regardless of what scan_fields found.
+    # Greenhouse hides the file input (visually-hidden), so scan_fields may miss
+    # it or the file-chooser path fails.  Clicking "Enter manually" and filling
+    # the revealed textarea is the most reliable path.
+    try:
+        await _fill_cover_letter_manually(fill_target, job)
     except Exception:
         pass
 
@@ -365,3 +378,62 @@ async def _wait_for_spa(page) -> None:
     except Exception:
         pass
     await page.wait_for_timeout(500)
+
+
+async def _fill_cover_letter_manually(page, job: Dict[str, Any]) -> None:
+    """Click 'Enter manually' near the cover letter field and fill the textarea.
+
+    Called after fill_form() as a safety net — the Greenhouse file input is
+    visually-hidden so scan_fields() may miss it, and the file-chooser path
+    is brittle.  This handler works purely from visible UI elements and is
+    independent of field detection.
+
+    `page` may be a Frame (e.g. Greenhouse embedded on instacart.careers).
+    """
+    cl_text = ((job or {}).get("cover_letter") or "").strip()
+    if not cl_text:
+        return
+
+    # Find the "Enter manually" button.  Scope check: only proceed if the
+    # button is actually visible (i.e. we're on a form page that has it).
+    manual_btn = page.get_by_role(
+        "button", name=re.compile(r"enter.?manually", re.I)
+    ).first
+    if await manual_btn.count() == 0 or not await manual_btn.is_visible():
+        return
+
+    # Check if a textarea is already filled (user or earlier run did it).
+    for ta_chk in [
+        page.locator("textarea[name*='cover']").first,
+        page.locator("textarea[id*='cover']").first,
+        page.locator("textarea").last,
+    ]:
+        try:
+            if await ta_chk.count() > 0 and await ta_chk.is_visible():
+                existing = (await ta_chk.input_value()).strip()
+                if existing:
+                    return  # already filled
+        except Exception:
+            pass
+
+    await manual_btn.click()
+
+    # Wait for the textarea to appear.
+    try:
+        await page.locator("textarea").last.wait_for(state="visible", timeout=3000)
+    except Exception:
+        await page.wait_for_timeout(800)
+
+    # Fill the first matching textarea.
+    for ta_loc in [
+        page.locator("textarea[name*='cover']").first,
+        page.locator("textarea[id*='cover']").first,
+        page.locator("textarea").last,
+    ]:
+        try:
+            if await ta_loc.count() > 0 and await ta_loc.is_visible():
+                await ta_loc.click()
+                await ta_loc.fill(cl_text)
+                return
+        except Exception:
+            continue

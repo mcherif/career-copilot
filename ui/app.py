@@ -442,7 +442,8 @@ def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> No
             if cl_result.get("status") == "ok":
                 job_dict = dict(job_dict)
                 job_dict["cover_letter"] = cl_result["cover_letter"]
-                _prefill_log("Cover letter generated.")
+                preview = cl_result["cover_letter"][:120].replace("\n", " ")
+                _prefill_log(f"Cover letter generated: {preview}…")
                 # Persist to DB so it's available in the UI too.
                 session = _Session()
                 try:
@@ -459,7 +460,9 @@ def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> No
         except Exception as exc:
             _prefill_log(f"Cover letter error: {exc}")
     else:
-        _prefill_log("Cover letter already exists — skipping generation.")
+        cl_text = job_dict.get("cover_letter", "")
+        preview = cl_text[:120].replace("\n", " ")
+        _prefill_log(f"Cover letter ready: {preview}…")
 
     _prefill_log("Launching browser…")
     from utils.form_prefill import run_prefill_session
@@ -480,8 +483,9 @@ def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> No
         filled = result.get("filled", 0)
         skipped = result.get("skipped", 0)
         errors = result.get("errors", 0)
+        uploads = result.get("uploads", 0)
         ats = result.get("ats", "unknown")
-        _prefill_log(f"Done ({ats}): {filled} filled, {skipped} skipped, {errors} errors.")
+        _prefill_log(f"Done ({ats}): {filled} filled, {uploads} uploaded, {skipped} skipped, {errors} errors.")
 
     with _prefill_lock:
         _prefill["status"] = "done"

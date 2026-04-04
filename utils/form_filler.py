@@ -78,6 +78,19 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["person of color"],  lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
     (["colour"],           lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
     (["color"],            lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
+    # Work authorization — "legally entitled / authorized / eligible to work"
+    # Detect the country from the label and look up the profile value.
+    (["legally entitled", "canada"],   lambda p, j: "yes" if p.get("work_authorization", {}).get("canada") else "no"),
+    (["authorized to work", "canada"], lambda p, j: "yes" if p.get("work_authorization", {}).get("canada") else "no"),
+    (["eligible to work", "canada"],   lambda p, j: "yes" if p.get("work_authorization", {}).get("canada") else "no"),
+    (["legally entitled", "tunisia"],  lambda p, j: "yes" if p.get("work_authorization", {}).get("tunisia") else "no"),
+    (["sponsorship"],                  lambda p, j: "no" if not p.get("work_authorization", {}).get("sponsorship_required", True) else "yes"),
+    (["require sponsorship"],          lambda p, j: "no" if not p.get("work_authorization", {}).get("sponsorship_required", True) else "yes"),
+    (["need sponsorship"],             lambda p, j: "no" if not p.get("work_authorization", {}).get("sponsorship_required", True) else "yes"),
+    (["legally entitled"],             lambda p, j: "yes"),
+    (["authorized to work"],           lambda p, j: "yes"),
+    (["eligible to work"],             lambda p, j: "yes"),
+    (["work authorization"],           lambda p, j: "yes"),
 ]
 
 # Timezone label keyword → profile timezone values that match (lowercase)
@@ -156,6 +169,10 @@ _RACE_SYNONYMS: dict[str, list[str]] = {
 _COLOUR_SYNONYMS: dict[str, list[str]] = {
     "no":  ["no, i do not", "no, i don't", "no"],
     "yes": ["yes, i do", "yes"],
+}
+_YES_NO_SYNONYMS: dict[str, list[str]] = {
+    "yes": ["yes", "i am", "authorized", "entitled", "eligible", "i do"],
+    "no":  ["no", "i am not", "not authorized", "not entitled", "not eligible"],
 }
 _REFERRAL_SYNONYMS: dict[str, list[str]] = {
     "internet search": ["internet", "online search", "search engine", "google", "web search", "job board"],
@@ -452,6 +469,7 @@ async def fill_form(
                                     (("race", "ethnicity"),                                _RACE_SYNONYMS),
                                     (("colour", "color", "person of colour", "person of color"), _COLOUR_SYNONYMS),
                                     (("hear about", "referral source", "how did you find"), _REFERRAL_SYNONYMS),
+                                    (("legally entitled", "authorized to work", "eligible to work", "work authorization", "sponsorship"), _YES_NO_SYNONYMS),
                                 ]
                                 if not chosen_val:
                                     for kw_tuple, sdict in _SELECT_DEMO_MAP:
@@ -506,6 +524,42 @@ async def fill_form(
                 uploaded = False
                 upload_err = ""
                 fid = field.get("id") or ""
+                # Strategy 0 (cover letter only): click "Enter manually" to reveal
+                # a textarea, then fill it with the cover letter text.  This is far
+                # more reliable than the file-chooser path (Greenhouse/React state
+                # issues) and avoids DOCX generation entirely.
+                if is_cover_letter_field and not uploaded:
+                    cl_text = ((job or {}).get("cover_letter") or "").strip()
+                    if cl_text:
+                        try:
+                            manual_btn = page.get_by_role(
+                                "button", name=re.compile(r"enter.?manually", re.I)
+                            ).first
+                            if await manual_btn.count() > 0 and await manual_btn.is_visible():
+                                await manual_btn.click()
+                                # Wait for a textarea to appear (Greenhouse renders it async)
+                                try:
+                                    await page.locator("textarea").last.wait_for(
+                                        state="visible", timeout=3000
+                                    )
+                                except Exception:
+                                    await page.wait_for_timeout(800)
+                                # Try selectors in priority order; pick any visible textarea
+                                for ta_loc in [
+                                    page.locator("textarea[name*='cover']").first,
+                                    page.locator("textarea[id*='cover']").first,
+                                    page.locator("textarea").last,
+                                ]:
+                                    try:
+                                        if await ta_loc.count() > 0 and await ta_loc.is_visible():
+                                            await ta_loc.click()
+                                            await ta_loc.fill(cl_text)
+                                            uploaded = True
+                                            break
+                                    except Exception:
+                                        continue
+                        except Exception:
+                            pass
                 # Strategy 1: click the visible sibling button (Greenhouse pattern).
                 # Greenhouse wraps <button>Attach</button> + <label visually-hidden> +
                 # <input visually-hidden> in a div. The button is the real click target
@@ -516,16 +570,12 @@ async def fill_form(
                 _fc_page = getattr(page, "page", page)
                 if fid and not uploaded:
                     try:
-                        btn_h = await page.evaluate_handle(
-                            "(id) => { const el = document.getElementById(id); "
-                            "return el && el.parentElement "
-                            "? el.parentElement.querySelector('button') : null; }",
-                            fid,
-                        )
-                        btn = btn_h.as_element() if btn_h else None
-                        if btn and await btn.is_visible():
+                        # Use Locator (not ElementHandle) so React re-renders
+                        # between resume and cover-letter uploads don't cause staleness.
+                        btn_loc = page.locator(f'[id="{fid}"]').locator("xpath=../button").first
+                        if await btn_loc.count() > 0 and await btn_loc.is_visible():
                             async with _fc_page.expect_file_chooser(timeout=5000) as fc_info:
-                                await btn.click()
+                                await btn_loc.click()
                             fc = await fc_info.value
                             await fc.set_files(file_path)
                             uploaded = True
@@ -548,20 +598,25 @@ async def fill_form(
                 if not uploaded:
                     try:
                         if fid:
-                            el_h = await page.evaluate_handle(
-                                "id => document.getElementById(id)", fid
-                            )
-                            el = el_h.as_element()
+                            el_loc = page.locator(f'[id="{fid}"]').first
+                            if await el_loc.count() > 0:
+                                await el_loc.set_input_files(file_path)
+                                uploaded = True
+                            else:
+                                upload_err = "element not found"
                         else:
                             el = await _locate_field(page, field)
-                        if el:
-                            await el.set_input_files(file_path)
-                            uploaded = True
-                        else:
-                            upload_err = "element not found"
+                            if el:
+                                await el.set_input_files(file_path)
+                                uploaded = True
+                            else:
+                                upload_err = "element not found"
                     except Exception as e:
                         upload_err = str(e)
                 if uploaded:
+                    # Brief pause so React can finish re-rendering after the
+                    # upload before the next field (e.g. cover letter) is attempted.
+                    await page.wait_for_timeout(600)
                     actions.append({"field": label or fname, "type": "file",
                                     "action": "uploaded", "value": file_path})
                 else:
@@ -1162,6 +1217,7 @@ async def _select_combobox_option(
         ("race", "ethnicity"):           (_RACE_SYNONYMS,),        # type: ignore[dict-item]
         ("colour", "color", "person of colour", "person of color"): (_COLOUR_SYNONYMS,),  # type: ignore[dict-item]
         ("hear about", "how did you find", "referral source", "referral"): (_REFERRAL_SYNONYMS,),  # type: ignore[dict-item]
+        ("legally entitled", "authorized to work", "eligible to work", "work authorization", "sponsorship"): (_YES_NO_SYNONYMS,),  # type: ignore[dict-item]
     }
     synonym_dict = None
     for label_keys, (sdict,) in _DEMO_SYNONYMS.items():
