@@ -1213,17 +1213,25 @@ async def _select_combobox_option(
     # Use aria-controls to scope the search to the right listbox.
     aria_controls = await el.get_attribute("aria-controls") or ""
 
-    opts: list[dict] = await page.evaluate(
-        """(listboxId) => {
+    def _query_opts(listbox_id: str) -> str:
+        return """(listboxId) => {
             const lb = listboxId ? document.getElementById(listboxId) : null;
             const root = lb || document;
             return Array.from(root.querySelectorAll('[role="option"]'))
                 .filter(o => { const r = o.getBoundingClientRect();
                                return r.width > 0 && r.height > 0; })
                 .map(o => ({text: o.innerText.trim(), id: o.id}));
-        }""",
-        aria_controls,
-    )
+        }"""
+
+    opts: list[dict] = await page.evaluate(_query_opts(aria_controls), aria_controls)
+
+    # For search/filter comboboxes (e.g. country dropdowns), options only
+    # appear after typing.  Type the value and re-query.
+    if not opts:
+        await el.fill(value)
+        await asyncio.sleep(0.5)
+        aria_controls = await el.get_attribute("aria-controls") or ""
+        opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
 
     if not opts:
         await el.press("Escape")
