@@ -159,8 +159,13 @@ async def scan_fields(page: Page) -> list[dict]:
                 const r = el.getBoundingClientRect();
                 if (r.width === 0 && r.height === 0) return false;
                 const s = window.getComputedStyle(el);
-                return s.display !== 'none' && s.visibility !== 'hidden'
-                    && s.opacity !== '0';
+                if (s.display === 'none' || s.visibility === 'hidden') return false;
+                // Radio/checkbox inputs are often opacity:0 in styled forms
+                // (the visual circle is a CSS overlay).  Allow them through —
+                // fill_form uses check(force=True) which bypasses opacity.
+                const t = el.type || '';
+                if (t === 'radio' || t === 'checkbox') return true;
+                return s.opacity !== '0';
             }
 
             function getLabel(el, id) {
@@ -182,6 +187,25 @@ async def scan_fields(page: Page) -> list[dict]:
                         .filter(Boolean)
                         .join(' ');
                     if (txt) return txt;
+                }
+                // 4. Walk up parent elements to find a <label for="parentId"> —
+                //    Ashby puts the for= on a wrapper div, not on the <input>.
+                let node = el.parentElement;
+                for (let d = 0; d < 8; d++) {
+                    if (!node) break;
+                    if (node.id) {
+                        const lb = document.querySelector('label[for="' + node.id + '"]');
+                        if (lb) return lb.innerText.trim();
+                    }
+                    // Sibling <label> immediately preceding this container
+                    let sib = node.previousElementSibling;
+                    while (sib) {
+                        if (sib.tagName === 'LABEL') return sib.innerText.trim();
+                        const inner = sib.querySelector('label');
+                        if (inner) return inner.innerText.trim();
+                        sib = sib.previousElementSibling;
+                    }
+                    node = node.parentElement;
                 }
                 return '';
             }

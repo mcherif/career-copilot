@@ -840,57 +840,72 @@ def _pick_radio(
     profile_tz = (profile.get("personal", {}).get("timezone") or "").lower()
     profile_gender = (profile.get("personal", {}).get("gender") or "").lower()
 
-    # Gender / sex question.
-    if any(kw in question_label for kw in ("gender", "sex")):
+    # Use whole-word matching for single-word keywords to avoid "sex" matching
+    # inside "sexual orientation", "race" inside "embrace", etc.
+    q_words = set(re.findall(r"\w+", question_label))
+
+    def _syn_match(synonyms: list[str], option: str) -> bool:
+        """Return True if any synonym matches the option (word-boundary aware)."""
+        opt_lower = option.lower()
+        opt_words = set(re.findall(r"\w+", opt_lower))
+        return any(
+            (s in opt_lower) if " " in s else (s in opt_words)
+            for s in synonyms
+        )
+
+    # Gender / sex question (whole-word "gender" or "sex", NOT "sexual").
+    if "gender" in q_words or "sex" in q_words:
         synonyms = _GENDER_SYNONYMS.get(profile_gender, [profile_gender])
         for i, opt in enumerate(option_labels):
-            if any(syn == opt.lower() or syn in opt.lower() for syn in synonyms):
+            if _syn_match(synonyms, opt):
                 return i
         return None
 
-    # Sexual orientation.
-    if any(kw in question_label for kw in ("sexual orientation", "lgbtq", "lgbtqia", "2slgbtqia")):
+    # Sexual orientation — multi-word phrase check first so "sexual orientation"
+    # wins over any single-word "sex" match (which is guarded above anyway).
+    if "sexual orientation" in question_label or any(
+        kw in q_words for kw in ("lgbtq", "lgbtqia", "2slgbtqia")
+    ):
         val = (profile.get("personal", {}).get("sexual_orientation") or "").lower()
         synonyms = _ORIENTATION_SYNONYMS.get(val, [val])
         for i, opt in enumerate(option_labels):
-            opt_words = set(re.findall(r"\w+", opt))
-            if any((s in opt) if " " in s else (s in opt_words) for s in synonyms):
+            if _syn_match(synonyms, opt):
                 return i
         return None
 
-    # Race / ethnicity.
-    if any(kw in question_label for kw in ("race", "ethnicity", "ethnic")):
+    # Race / ethnicity (whole-word to avoid "race" in "embrace").
+    if any(kw in q_words for kw in ("race", "ethnicity", "ethnic")):
         val = (profile.get("personal", {}).get("race") or "").lower()
         synonyms = _RACE_SYNONYMS.get(val, [val])
         for i, opt in enumerate(option_labels):
-            if any(s in opt for s in synonyms):
+            if _syn_match(synonyms, opt):
                 return i
         return None
 
     # Disability.
-    if "disability" in question_label or "disabled" in question_label:
+    if "disability" in q_words or "disabled" in q_words:
         val = (profile.get("personal", {}).get("disability") or "").lower()
         synonyms = _DISABILITY_SYNONYMS.get(val, [val])
         for i, opt in enumerate(option_labels):
-            if any(s in opt for s in synonyms):
+            if _syn_match(synonyms, opt):
                 return i
         return None
 
     # Veteran / military.
-    if any(kw in question_label for kw in ("veteran", "armed forces", "military")):
+    if any(kw in q_words for kw in ("veteran", "military")) or "armed forces" in question_label:
         val = (profile.get("personal", {}).get("veteran") or "").lower()
         synonyms = _VETERAN_SYNONYMS.get(val, [val])
         for i, opt in enumerate(option_labels):
-            if any(s in opt for s in synonyms):
+            if _syn_match(synonyms, opt):
                 return i
         return None
 
     # Person of colour.
-    if any(kw in question_label for kw in ("colour", "color", "person of col")):
+    if any(kw in q_words for kw in ("colour", "color")) or "person of col" in question_label:
         val = (profile.get("personal", {}).get("person_of_colour") or "").lower()
         synonyms = _COLOUR_SYNONYMS.get(val, [val])
         for i, opt in enumerate(option_labels):
-            if any(s in opt for s in synonyms):
+            if _syn_match(synonyms, opt):
                 return i
         return None
 
@@ -1024,6 +1039,46 @@ async def _build_context_map(page: Page, fields: list[dict]) -> dict[int, str]:
             for pos, idx in enumerate(anon_indices):
                 if pos < len(batch) and batch[pos]:
                     context_map[idx] = batch[pos]
+        except Exception:
+            pass
+
+    # --- Batch 3: radio group question text -----------------------------------
+    # Each radio option label is the option text (e.g. "Man"), not the question
+    # ("Which option best describes your gender?").  For ATSes like Ashby the
+    # question text lives in a <label for="question_uuid"> where the question
+    # UUID is embedded in the radio's name attribute.  Fetch it once per group.
+    radio_groups: dict[str, int] = {}   # name → first field index in that group
+    for idx, f in enumerate(fields):
+        if f.get("type") != "radio":
+            continue
+        fname = f.get("name") or ""
+        if not fname or fname in radio_groups:
+            continue
+        radio_groups[fname] = idx
+
+    if radio_groups:
+        group_names = list(radio_groups.keys())
+        try:
+            results: list[str] = await page.evaluate(
+                """(names) => names.map(name => {
+                    // Ashby: name = "{session_uuid}_{question_uuid}"
+                    // Extract the last UUID-shaped segment (36 chars) as question id.
+                    const qid = name.length >= 36 ? name.slice(-36) : name;
+                    const lb = document.querySelector('label[for="' + qid + '"]');
+                    if (lb) return lb.innerText.trim();
+                    // Fallback: label pointing to the full name
+                    const lb2 = document.querySelector('label[for="' + name + '"]');
+                    return lb2 ? lb2.innerText.trim() : '';
+                })""",
+                group_names,
+            )
+            for i, gname in enumerate(group_names):
+                question_text = results[i] if i < len(results) else ""
+                if question_text:
+                    for j, f in enumerate(fields):
+                        if f.get("type") == "radio" and f.get("name") == gname:
+                            if j not in context_map:
+                                context_map[j] = question_text
         except Exception:
             pass
 
