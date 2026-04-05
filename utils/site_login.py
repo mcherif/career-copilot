@@ -11,6 +11,21 @@ import asyncio
 from typing import Any, Dict
 
 
+async def dismiss_himalayas_modal(page) -> None:
+    """Dismiss the 'I'm ready to apply' interstitial modal on Himalayas.
+
+    This modal appears after login (and sometimes before) when navigating
+    to a job application page.  It must be dismissed before the ATS form loads.
+    """
+    try:
+        ready_btn = page.get_by_role("button", name="I'm ready to apply").first
+        if await ready_btn.count() > 0 and await ready_btn.is_visible(timeout=3000):
+            await ready_btn.click()
+            await asyncio.sleep(1)
+    except Exception:
+        pass
+
+
 async def try_site_login(
     page,
     url: str,
@@ -86,3 +101,4 @@ async def _himalayas_login(page, email: str, password: str) -> None:
         pass
 
     await asyncio.sleep(1)
+    await dismiss_himalayas_modal(page)

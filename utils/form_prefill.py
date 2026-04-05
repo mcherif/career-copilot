@@ -114,7 +114,7 @@ async def run_prefill_session(
                     if key in filled_urls:
                         return
                     result["ats"] = tab_ats
-                    await _do_fill(new_page, profile, job, result)
+                    await _do_fill(new_page, profile, job, result, log_fn=_log)
                     filled_urls.add(key)
                     new_page.on("close", lambda: closed_event.set())
                 except Exception:
@@ -163,6 +163,9 @@ async def run_prefill_session(
                 if clicked:
                     _log(f"Clicked Apply → {active_page.url[:80]}")
                     await _wait_for_spa(active_page)
+                    # Dismiss site-specific interstitial modals (e.g. Himalayas "I'm ready to apply").
+                    from utils.site_login import dismiss_himalayas_modal
+                    await dismiss_himalayas_modal(active_page)
             except Exception:
                 pass
 
@@ -180,6 +183,8 @@ async def run_prefill_session(
                             if clicked2:
                                 _log(f"Clicked Apply post-login → {active_page.url[:80]}")
                                 await _wait_for_spa(active_page)
+                                from utils.site_login import dismiss_himalayas_modal
+                                await dismiss_himalayas_modal(active_page)
                         except Exception:
                             pass
                 except Exception:
@@ -225,7 +230,7 @@ async def run_prefill_session(
                     _log(f"ATS detected: {ats} — filling form…")
                     result["ats"] = ats
                     key = _page_key(active_page.url)
-                    await _do_fill(active_page, profile, job, result)
+                    await _do_fill(active_page, profile, job, result, log_fn=_log)
                     filled_urls.add(key)
                 else:
                     _log("No application form detected — browser is open, navigate to the form manually.")
@@ -242,7 +247,7 @@ async def run_prefill_session(
                 closed_event.set()
 
             watch_task = asyncio.create_task(
-                _watch_for_ats_and_fill(active_page, profile, job, result, closed_event, filled_urls)
+                _watch_for_ats_and_fill(active_page, profile, job, result, closed_event, filled_urls, log_fn=_log)
             )
 
             # Poll cancel_event every 2s so a stop request closes the browser quickly.
@@ -279,7 +284,7 @@ async def run_prefill_session(
         return {"status": "failed", "error": str(exc)}
 
 
-async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: Dict[str, Any]) -> None:
+async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: Dict[str, Any], log_fn=None) -> None:
     """Scan and fill all form fields on the current page; update result in place."""
     fields, fill_target = await _scan_with_frame_fallback(page)
 
@@ -303,7 +308,7 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
     cl_file_uploaded = False
     if fields:
         try:
-            actions = await fill_form(fill_target, fields, profile, job)
+            actions = await fill_form(fill_target, fields, profile, job, log_fn=log_fn)
             result["filled"] += sum(
                 1 for a in actions if a["action"] in ("filled", "checked", "selected")
             )
@@ -340,6 +345,7 @@ async def _watch_for_ats_and_fill(
     closed_event: asyncio.Event,
     filled_urls: Set[str],
     poll_interval: float = 1.5,
+    log_fn=None,
 ) -> None:
     """Poll page.url for same-tab navigation to ATS pages not yet filled."""
     while not closed_event.is_set():
@@ -360,7 +366,7 @@ async def _watch_for_ats_and_fill(
                 continue
             await _wait_for_spa(page)
             result["ats"] = current_ats
-            await _do_fill(page, profile, job, result)
+            await _do_fill(page, profile, job, result, log_fn=log_fn)
             filled_urls.add(key)
         except Exception:
             pass
@@ -447,11 +453,14 @@ async def _fill_cover_letter_manually(page, job: Dict[str, Any]) -> None:
     if not cl_text:
         return
 
-    # Find the "Enter manually" button.  Scope check: only proceed if the
-    # button is actually visible (i.e. we're on a form page that has it).
-    manual_btn = page.get_by_role(
-        "button", name=re.compile(r"enter.?manually", re.I)
-    ).first
+    # Find the "Enter manually" button scoped to the cover letter section.
+    # Greenhouse forms have two such buttons (resume + cover letter); we must
+    # target the cover-letter-specific one (data-testid="cover_letter-text").
+    manual_btn = page.locator("[data-testid='cover_letter-text']").first
+    if await manual_btn.count() == 0 or not await manual_btn.is_visible(timeout=500):
+        manual_btn = page.get_by_role(
+            "button", name=re.compile(r"enter.?manually", re.I)
+        ).last  # cover letter "Enter manually" is always after the resume one
     if await manual_btn.count() == 0 or not await manual_btn.is_visible():
         return
 

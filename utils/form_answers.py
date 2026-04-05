@@ -25,11 +25,15 @@ _SYSTEM_PROMPT = (
 # Labels that clearly map to standard profile fields — never route to LLM.
 _SKIP_LABELS = {
     "name", "first name", "last name", "full name",
-    "email", "phone", "linkedin", "github", "portfolio",
-    "website", "url", "location", "city", "country",
-    "salary", "rate", "compensation", "years", "experience",
+    "email", "phone", "linkedin", "github",
+    "salary", "rate",
     "cover letter", "resume", "cv",
 }
+# NOTE: "compensation", "years", "experience", "location", "city", "country"
+# are intentionally NOT here — substring-matching them blocks freeform questions
+# like "3+ years of experience with Python" or "compensation requirements".
+# The _resolve_text_value guard in fill_form already skips LLM when a
+# rule-based value is available for structured fields.
 
 
 def is_llm_question(label_lower: str, ftype: str) -> bool:
@@ -49,6 +53,12 @@ def is_llm_question(label_lower: str, ftype: str) -> bool:
         "motivation", "why", "what about", "what draws",
         "what excites", "how would", "describe", "tell us",
         "greatest", "challenge", "proud", "achievement",
+        "share", "recent project", "work sample", "examples of",
+        "please provide", "please explain", "tell me",
+        "please confirm", "confirm that", "are you ready",
+        "what was", "what were", "how long", "fastest",
+        "compensation", "salary requirement", "rate requirement",
+        "specifications", "internet speed",
     ]
     return any(t in label_lower for t in question_triggers)
 

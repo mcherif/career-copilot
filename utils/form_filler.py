@@ -42,17 +42,23 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["phone"],        lambda p, j: p.get("personal", {}).get("phone", "")),
     (["country"],      lambda p, j: p.get("personal", {}).get("phone_country", "") or p.get("personal", {}).get("location", "").split(",")[-1].strip()),
     (["linkedin"],     lambda p, j: p.get("personal", {}).get("linkedin", "")),
-    (["portfolio"],    lambda p, j: p.get("personal", {}).get("website", "")),
-    (["website"],      lambda p, j: p.get("personal", {}).get("website", "")),
+    (["portfolio"],    lambda p, j: p.get("personal", {}).get("website", "") or p.get("personal", {}).get("github", "")),
+    (["website"],      lambda p, j: p.get("personal", {}).get("website", "") or p.get("personal", {}).get("github", "")),
     (["github"],       lambda p, j: p.get("personal", {}).get("github", "")),
+    # "Share a link to your portfolio / recent projects" — point to github when no website.
+    (["share", "link"],  lambda p, j: p.get("personal", {}).get("website", "") or p.get("personal", {}).get("github", "")),
+    (["recent project"], lambda p, j: p.get("personal", {}).get("website", "") or p.get("personal", {}).get("github", "")),
+    (["work sample"],    lambda p, j: p.get("personal", {}).get("website", "") or p.get("personal", {}).get("github", "")),
     (["location", "based"],   lambda p, j: p.get("personal", {}).get("location", "")),
     (["location"],     lambda p, j: p.get("personal", {}).get("location", "")),
     (["where"],        lambda p, j: p.get("personal", {}).get("location", "")),
     (["city"],         lambda p, j: p.get("personal", {}).get("location", "")),
     (["country"],      lambda p, j: p.get("personal", {}).get("location", "")),
-    (["years"],        lambda p, j: _years_label(p)),
-    (["start"],        lambda p, j: _years_label(p)),
-    (["experience"],   lambda p, j: _years_label(p)),
+    (["years of experience"],  lambda p, j: _years_label(p)),
+    (["years experience"],     lambda p, j: _years_label(p)),
+    (["how many years"],       lambda p, j: _years_label(p)),
+    (["years"],                lambda p, j: _years_label(p)),
+    (["start date"],           lambda p, j: _years_label(p)),
     (["referral", "hear"],    lambda p, j: p.get("preferences", {}).get("referral_source", "internet search")),
     (["how did you find"],    lambda p, j: p.get("preferences", {}).get("referral_source", "internet search")),
     (["hear about"],          lambda p, j: p.get("preferences", {}).get("referral_source", "internet search")),
@@ -91,6 +97,9 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["authorized to work"],           lambda p, j: "yes"),
     (["eligible to work"],             lambda p, j: "yes"),
     (["work authorization"],           lambda p, j: "yes"),
+    # Languages spoken
+    (["language"],                     lambda p, j: ", ".join(p.get("languages", []))),
+    (["speak fluently"],               lambda p, j: ", ".join(p.get("languages", []))),
 ]
 
 # Timezone label keyword → profile timezone values that match (lowercase)
@@ -210,12 +219,20 @@ async def fill_form(
     profile: dict,
     job: dict,
     dry_run: bool = False,
+    log_fn=None,
 ) -> list[dict]:
     """Fill all detected form fields based on the profile and job.
 
     Returns a list of action records:
         {"field": label, "type": type, "action": "filled"/"checked"/"skipped", "value": value}
     """
+    def _log(msg: str) -> None:
+        if log_fn:
+            try:
+                log_fn(msg)
+            except Exception:
+                pass
+
     actions: list[dict] = []
 
     # Build DOM context for anonymous fields once (expensive JS call).
@@ -247,6 +264,8 @@ async def fill_form(
                 question_batch.append((i, question_text))
 
         if question_batch:
+            _log(f"LLM answering {len(question_batch)} question(s): " +
+                 ", ".join(f'"{q[:50]}"' for _, q in question_batch[:5]))
             llm_answers = await generate_answers(question_batch, job, profile)
 
     # Track text fields that have no meaningful identifier (including those
@@ -414,6 +433,7 @@ async def fill_form(
             if chosen is None and not dry_run and option_labels:
                 try:
                     from utils.form_answers import pick_option as _pick_opt
+                    _log(f'LLM picking radio for "{(group_display or label_lower)[:60]}"')
                     chosen_text = await _pick_opt(
                         group_display or label_lower, option_labels, profile, job
                     )
@@ -508,6 +528,7 @@ async def fill_form(
                                 if not chosen_val:
                                     try:
                                         from utils.form_answers import pick_option as _pick_opt
+                                        _log(f'LLM picking select option for "{label_lower[:60]}"')
                                         chosen_text = await _pick_opt(label_lower, opt_texts, profile, job)
                                         if chosen_text:
                                             for t, v in zip(opt_texts, opt_vals):
@@ -565,9 +586,18 @@ async def fill_form(
                     cl_text = ((job or {}).get("cover_letter") or "").strip()
                     if cl_text:
                         try:
-                            manual_btn = page.get_by_role(
-                                "button", name=re.compile(r"enter.?manually", re.I)
-                            ).first
+                            # Prefer the scoped button inside the cover-letter upload
+                            # container (Greenhouse has two "Enter manually" buttons —
+                            # one for resume and one for cover letter).
+                            # data-testid="cover_letter-text" is the specific one.
+                            manual_btn = page.locator("[data-testid='cover_letter-text']").first
+                            if await manual_btn.count() == 0 or not await manual_btn.is_visible(timeout=500):
+                                # Fallback: scope to the file-upload wrapper nearest to cover_letter input.
+                                manual_btn = page.locator(
+                                    "#cover_letter"
+                                ).locator(
+                                    "xpath=ancestor::div[contains(@class,'file-upload__wrapper')]"
+                                ).get_by_role("button", name=re.compile(r"enter.?manually", re.I)).first
                             if await manual_btn.count() > 0 and await manual_btn.is_visible():
                                 await manual_btn.click()
                                 # Wait for a textarea to appear (Greenhouse renders it async)
@@ -870,6 +900,17 @@ def _pick_radio(
         synonyms = _ORIENTATION_SYNONYMS.get(val, [val])
         for i, opt in enumerate(option_labels):
             if _syn_match(synonyms, opt):
+                return i
+        return None
+
+    # Hispanic / Latino — a separate yes/no question distinct from race.
+    # Answer "yes" only if profile race explicitly includes hispanic/latino synonyms.
+    if "hispanic" in question_label or "latino" in question_label or "latina" in question_label:
+        val = (profile.get("personal", {}).get("race") or "").lower()
+        is_hispanic = any(s in val for s in ("hispanic", "latino", "latina"))
+        target = "yes" if is_hispanic else "no"
+        for i, opt in enumerate(option_labels):
+            if target in opt.lower():
                 return i
         return None
 
