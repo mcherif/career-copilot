@@ -21,7 +21,6 @@ SYSTEM_BROWSER_DOMAINS = {
     "weworkremotely.com",
     "jobicy.com",
     "getonbrd.com",
-    "himalayas.app",
 }
 
 
