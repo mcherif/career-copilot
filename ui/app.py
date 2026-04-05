@@ -578,6 +578,12 @@ async def open_job(job_id: int):
     except Exception:
         profile = {}
 
+    # Clear the log immediately so the UI doesn't show stale entries from
+    # a previous job while the new prefill thread is starting up.
+    with _prefill_lock:
+        _prefill["log"] = []
+        _prefill["status"] = "starting"
+
     threading.Thread(target=_run_prefill_thread, args=(job_dict, profile), daemon=True).start()
     return {"ok": True, "system_browser": False, "message": "Browser opening…"}
 
