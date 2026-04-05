@@ -91,6 +91,79 @@ def _call_ollama(question: str, job: Dict[str, Any], profile: Dict[str, Any]) ->
         return ""
 
 
+def _call_ollama_pick(
+    question: str, options: List[str], profile: Dict[str, Any], job: Dict[str, Any]
+) -> str | None:
+    """Use LLM to pick the best option from a list for a dropdown/radio field.
+
+    Returns the exact option text, or None on failure.
+    """
+    p = profile.get("personal", {})
+    profile_summary = ", ".join(filter(None, [
+        f"name={p.get('name', '')}",
+        f"location={p.get('location', '')}",
+        f"gender={p.get('gender', '')}",
+        f"race={p.get('race', '')}",
+        f"sexual_orientation={p.get('sexual_orientation', '')}",
+        f"disability={p.get('disability', '')}",
+        f"veteran={p.get('veteran', '')}",
+    ]))
+    opts_text = "\n".join(f"{i + 1}. {o}" for i, o in enumerate(options))
+    prompt = "\n".join([
+        f"Candidate profile: {profile_summary}",
+        "",
+        f"Form question: {question}",
+        "",
+        "Options:",
+        opts_text,
+        "",
+        "Pick the number of the most appropriate option for this candidate.",
+        "Reply with just the number, nothing else.",
+    ])
+    payload = {
+        "model": config.OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content":
+                "You are helping fill a job application. "
+                "Pick the best matching option for the candidate. "
+                "Reply with just the option number."},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+        "keep_alive": "10m",
+    }
+    try:
+        import re as _re
+        r = requests.post(config.OLLAMA_URL, json=payload, timeout=config.LLM_TIMEOUT)
+        r.raise_for_status()
+        content = str(r.json().get("message", {}).get("content") or "").strip()
+        m = _re.search(r"\d+", content)
+        if m:
+            idx = int(m.group()) - 1
+            if 0 <= idx < len(options):
+                return options[idx]
+    except Exception:
+        pass
+    return None
+
+
+async def pick_option(
+    question: str,
+    options: List[str],
+    profile: Dict[str, Any],
+    job: Dict[str, Any],
+) -> str | None:
+    """Async wrapper: ask the LLM to pick the best option for a choice field.
+
+    Only called when rule-based synonym matching fails.
+    Returns the exact option text on success, or None.
+    """
+    if not options or not question:
+        return None
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _call_ollama_pick, question, options, profile, job)
+
+
 async def generate_answers(
     questions: List[Tuple[int, str]],
     job: Dict[str, Any],

@@ -160,11 +160,13 @@ _ORIENTATION_SYNONYMS: dict[str, list[str]] = {
     "other":     ["other", "prefer not"],
 }
 _RACE_SYNONYMS: dict[str, list[str]] = {
-    "white":    ["white", "caucasian", "european"],
-    "black":    ["black", "african american", "african-american"],
-    "asian":    ["asian"],
-    "hispanic": ["hispanic", "latino", "latina"],
-    "other":    ["other", "multiracial", "two or more"],
+    "white":         ["white", "caucasian", "european"],
+    "black":         ["black", "african american", "african-american"],
+    "asian":         ["asian"],
+    "hispanic":      ["hispanic", "latino", "latina"],
+    "north african": ["north africa", "west asian", "arab", "middle east", "mena",
+                      "middle eastern", "north african"],
+    "other":         ["other", "multiracial", "two or more"],
 }
 _COLOUR_SYNONYMS: dict[str, list[str]] = {
     "no":  ["no, i do not", "no, i don't", "no"],
@@ -325,7 +327,7 @@ async def fill_form(
                 # ARIA combobox (react-select etc.): click + pick option.
                 if field.get("role") == "combobox":
                     try:
-                        chosen = await _select_combobox_option(page, field, value, label_lower)
+                        chosen = await _select_combobox_option(page, field, value, label_lower, profile=profile, job=job)
                         if chosen:
                             actions.append({"field": label or f"anon-text-{idx}", "type": "combobox",
                                             "action": "selected", "value": chosen})
@@ -408,6 +410,22 @@ async def fill_form(
             # Use first option's context (question text) as the group display name.
             group_display = context_map.get(idx, group_key) or group_key
 
+            # LLM fallback for radio groups that no rule matched.
+            if chosen is None and not dry_run and option_labels:
+                try:
+                    from utils.form_answers import pick_option as _pick_opt
+                    chosen_text = await _pick_opt(
+                        group_display or label_lower, option_labels, profile, job
+                    )
+                    if chosen_text:
+                        chosen_lower = chosen_text.lower()
+                        for i, opt in enumerate(option_labels):
+                            if opt.lower() == chosen_lower or chosen_lower in opt.lower():
+                                chosen = i
+                                break
+                except Exception:
+                    pass
+
             if chosen is not None:
                 chosen_field = group_fields[chosen]
                 chosen_label = _effective_label(
@@ -486,6 +504,18 @@ async def fill_form(
                                                 if chosen_val:
                                                     break
                                             break
+                                # 3. LLM fallback for unrecognised option text.
+                                if not chosen_val:
+                                    try:
+                                        from utils.form_answers import pick_option as _pick_opt
+                                        chosen_text = await _pick_opt(label_lower, opt_texts, profile, job)
+                                        if chosen_text:
+                                            for t, v in zip(opt_texts, opt_vals):
+                                                if t.lower() == chosen_text.lower():
+                                                    chosen_val = v
+                                                    break
+                                    except Exception:
+                                        pass
                                 if chosen_val:
                                     await el.select_option(value=chosen_val)
                         actions.append({"field": label or fname, "type": "select",
@@ -818,6 +848,52 @@ def _pick_radio(
                 return i
         return None
 
+    # Sexual orientation.
+    if any(kw in question_label for kw in ("sexual orientation", "lgbtq", "lgbtqia", "2slgbtqia")):
+        val = (profile.get("personal", {}).get("sexual_orientation") or "").lower()
+        synonyms = _ORIENTATION_SYNONYMS.get(val, [val])
+        for i, opt in enumerate(option_labels):
+            opt_words = set(re.findall(r"\w+", opt))
+            if any((s in opt) if " " in s else (s in opt_words) for s in synonyms):
+                return i
+        return None
+
+    # Race / ethnicity.
+    if any(kw in question_label for kw in ("race", "ethnicity", "ethnic")):
+        val = (profile.get("personal", {}).get("race") or "").lower()
+        synonyms = _RACE_SYNONYMS.get(val, [val])
+        for i, opt in enumerate(option_labels):
+            if any(s in opt for s in synonyms):
+                return i
+        return None
+
+    # Disability.
+    if "disability" in question_label or "disabled" in question_label:
+        val = (profile.get("personal", {}).get("disability") or "").lower()
+        synonyms = _DISABILITY_SYNONYMS.get(val, [val])
+        for i, opt in enumerate(option_labels):
+            if any(s in opt for s in synonyms):
+                return i
+        return None
+
+    # Veteran / military.
+    if any(kw in question_label for kw in ("veteran", "armed forces", "military")):
+        val = (profile.get("personal", {}).get("veteran") or "").lower()
+        synonyms = _VETERAN_SYNONYMS.get(val, [val])
+        for i, opt in enumerate(option_labels):
+            if any(s in opt for s in synonyms):
+                return i
+        return None
+
+    # Person of colour.
+    if any(kw in question_label for kw in ("colour", "color", "person of col")):
+        val = (profile.get("personal", {}).get("person_of_colour") or "").lower()
+        synonyms = _COLOUR_SYNONYMS.get(val, [val])
+        for i, opt in enumerate(option_labels):
+            if any(s in opt for s in synonyms):
+                return i
+        return None
+
     # Timezone question.
     if "timezone" in question_label or "utc" in " ".join(option_labels[:2]):
         for i, opt in enumerate(option_labels):
@@ -1066,6 +1142,20 @@ async def _locate_field(page: Page, field: dict):
         except Exception:
             pass
 
+    # For non-input comboboxes (button/div with role="combobox") located by
+    # aria label association — used for Ashby EEO dropdowns and similar.
+    if field.get("role") == "combobox" and field.get("tag", "input") not in ("input", "select"):
+        label = field.get("label") or ""
+        if label:
+            try:
+                el = await page.get_by_role("combobox", name=re.compile(
+                    re.escape(label[:60]), re.I
+                )).first.element_handle()
+                if el and await el.is_visible():
+                    return el
+            except Exception:
+                pass
+
     return None
 
 
@@ -1196,8 +1286,21 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
         return ""
 
 
+async def _click_option(page: Page, opt: dict) -> None:
+    """Click a combobox option by id (preferred) or by text fallback."""
+    if opt.get("id"):
+        await page.locator(f'[id="{opt["id"]}"]').first.click()
+    else:
+        await page.locator('[role="option"]').filter(has_text=opt["text"]).first.click()
+
+
 async def _select_combobox_option(
-    page: Page, field: dict, value: str, label_lower: str
+    page: Page,
+    field: dict,
+    value: str,
+    label_lower: str,
+    profile: dict | None = None,
+    job: dict | None = None,
 ) -> str | None:
     """Click an ARIA combobox (react-select etc.) and select the best matching option.
 
@@ -1226,8 +1329,10 @@ async def _select_combobox_option(
     opts: list[dict] = await page.evaluate(_query_opts(aria_controls), aria_controls)
 
     # For search/filter comboboxes (e.g. country dropdowns), options only
-    # appear after typing.  Type the value and re-query.
-    if not opts:
+    # appear after typing.  Only try fill() on actual <input> elements —
+    # <button>/<div> comboboxes don't support fill().
+    is_input = field.get("tag", "input") == "input"
+    if not opts and is_input:
         await el.fill(value)
         await asyncio.sleep(0.5)
         aria_controls = await el.get_attribute("aria-controls") or ""
@@ -1243,7 +1348,7 @@ async def _select_combobox_option(
     # 1. Exact case-insensitive match.
     for i, t in enumerate(opt_texts_lower):
         if t == val_lower:
-            await page.locator(f'[id="{opts[i]["id"]}"]').first.click()
+            await _click_option(page, opts[i])
             return opts[i]["text"]
 
     # 2. Demographic synonym match using label-specific dictionaries.
@@ -1252,7 +1357,7 @@ async def _select_combobox_option(
         ("disability",):                 (_DISABILITY_SYNONYMS,),  # type: ignore[dict-item]
         ("veteran", "armed forces", "military"): (_VETERAN_SYNONYMS,),  # type: ignore[dict-item]
         ("sexual orientation", "lgbtq", "lgbtqia", "2slgbtqia"): (_ORIENTATION_SYNONYMS,),  # type: ignore[dict-item]
-        ("race", "ethnicity"):           (_RACE_SYNONYMS,),        # type: ignore[dict-item]
+        ("race", "ethnicity", "ethnic"): (_RACE_SYNONYMS,),        # type: ignore[dict-item]
         ("colour", "color", "person of colour", "person of color"): (_COLOUR_SYNONYMS,),  # type: ignore[dict-item]
         ("hear about", "how did you find", "referral source", "referral"): (_REFERRAL_SYNONYMS,),  # type: ignore[dict-item]
         ("legally entitled", "authorized to work", "eligible to work", "work authorization", "sponsorship"): (_YES_NO_SYNONYMS,),  # type: ignore[dict-item]
@@ -1272,14 +1377,29 @@ async def _select_combobox_option(
                 (s in t) if " " in s else (s in opt_words)
                 for s in synonyms
             ):
-                await page.locator(f'[id="{opts[i]["id"]}"]').first.click()
+                await _click_option(page, opts[i])
                 return opts[i]["text"]
 
     # 3. Substring match (value contained in option or vice versa).
     for i, t in enumerate(opt_texts_lower):
         if val_lower in t or t in val_lower:
-            await page.locator(f'[id="{opts[i]["id"]}"]').first.click()
+            await _click_option(page, opts[i])
             return opts[i]["text"]
+
+    # 4. LLM fallback — when no synonym/substring rule matches, ask the model.
+    if profile is not None:
+        try:
+            from utils.form_answers import pick_option as _pick_opt
+            opt_texts = [o["text"] for o in opts]
+            chosen_text = await _pick_opt(label_lower, opt_texts, profile, job or {})
+            if chosen_text:
+                chosen_lower = chosen_text.lower()
+                for i, o in enumerate(opts):
+                    if o["text"].lower() == chosen_lower:
+                        await _click_option(page, opts[i])
+                        return opts[i]["text"]
+        except Exception:
+            pass
 
     await el.press("Escape")
     return None

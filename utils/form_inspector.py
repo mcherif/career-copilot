@@ -186,7 +186,7 @@ async def scan_fields(page: Page) -> list[dict]:
                 return '';
             }
 
-            return Array.from(document.querySelectorAll(sel))
+            const fields = Array.from(document.querySelectorAll(sel))
                 .filter(isVisible)
                 .map(el => {
                     const tag = el.tagName.toLowerCase();
@@ -207,6 +207,42 @@ async def scan_fields(page: Page) -> list[dict]:
                     };
                 })
                 .filter(Boolean);
+
+            // Pass 2: non-input comboboxes — Ashby EEO dropdowns and similar
+            // ATSes that render dropdowns as <button aria-haspopup="listbox">
+            // or <div role="combobox">.  These are invisible to the input/select
+            // selector above but are fully interactive.
+            const capturedIds = new Set(fields.map(f => f.id).filter(Boolean));
+            const sel2 = [
+                "button[aria-haspopup='listbox']",
+                "[role='combobox']:not(input):not(select)",
+                "[aria-haspopup='listbox']:not(input):not(select)",
+            ].join(',');
+            const fields2 = Array.from(document.querySelectorAll(sel2))
+                .filter(el => {
+                    if (!isVisible(el)) return false;
+                    if (el.id && capturedIds.has(el.id)) return false;
+                    return true;
+                })
+                .map(el => {
+                    const tag = el.tagName.toLowerCase();
+                    const id  = el.id || '';
+                    const label = getLabel(el, id);
+                    if (!id && !label) return null;
+                    return {
+                        tag,
+                        type: 'text',
+                        name: el.getAttribute('name') || '',
+                        id,
+                        placeholder: '',
+                        label,
+                        required: el.getAttribute('aria-required') === 'true',
+                        role: 'combobox',
+                    };
+                })
+                .filter(Boolean);
+
+            return [...fields, ...fields2];
         }""")
         return fields or []
     except Exception:
