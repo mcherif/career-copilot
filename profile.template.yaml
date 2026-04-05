@@ -78,3 +78,11 @@ resumes:
       - software
       - backend
       - api
+
+# Credentials for job board sites that require login before you can apply.
+# Used by the prefill automation to log in automatically.
+# profile.yaml is git-ignored — credentials are never committed.
+credentials:
+  himalayas.app:
+    email: "jane@example.com"
+    password: "your_password"

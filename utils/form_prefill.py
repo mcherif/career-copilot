@@ -166,6 +166,25 @@ async def run_prefill_session(
             except Exception:
                 pass
 
+            # Auto-login for known sites that gate Apply behind authentication.
+            credentials = profile.get("credentials", {})
+            if credentials:
+                from utils.site_login import try_site_login
+                try:
+                    logged_in = await try_site_login(active_page, active_page.url, credentials, _log)
+                    if logged_in:
+                        await _wait_for_spa(active_page)
+                        # After login, try clicking Apply again on the redirected page.
+                        try:
+                            clicked2, active_page = await try_click_apply(active_page)
+                            if clicked2:
+                                _log(f"Clicked Apply post-login → {active_page.url[:80]}")
+                                await _wait_for_spa(active_page)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
             # Ashby shortcut: if on a listing page, go to /application directly.
             # Uses _ashby_application_url to correctly insert /application into
             # the path BEFORE any query string (UTM params etc.).
