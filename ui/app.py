@@ -366,6 +366,13 @@ async def update_status(job_id: int, body: StatusUpdate):
             raise HTTPException(404, f"Job {job_id} not found")
         job.status = body.status
         session.commit()
+        # Close the Playwright browser when the user marks a job as applied,
+        # so they can immediately open the next job without hitting the
+        # "prefill already running" guard.
+        if body.status == "applied":
+            with _prefill_lock:
+                if _prefill["status"] == "running" and _prefill["job_id"] == job_id:
+                    _prefill_cancel.set()
         return {"ok": True, "id": job_id, "status": body.status}
     except HTTPException:
         raise
