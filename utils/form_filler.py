@@ -93,6 +93,11 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["sponsorship"],                  lambda p, j: "no" if not p.get("work_authorization", {}).get("sponsorship_required", True) else "yes"),
     (["require sponsorship"],          lambda p, j: "no" if not p.get("work_authorization", {}).get("sponsorship_required", True) else "yes"),
     (["need sponsorship"],             lambda p, j: "no" if not p.get("work_authorization", {}).get("sponsorship_required", True) else "yes"),
+    # Hispanic / Latino yes-or-no question — derive from profile race.
+    (["hispanic", "latino"],           lambda p, j: "yes" if any(
+        s in (p.get("personal", {}).get("race") or "").lower()
+        for s in ("hispanic", "latino", "latina")
+    ) else "no"),
     # Non-compete / restrictive covenant — always "no"
     (["non-compete"],                  lambda p, j: "no"),
     (["noncompete"],                   lambda p, j: "no"),
