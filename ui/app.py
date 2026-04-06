@@ -430,6 +430,7 @@ def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> No
     with _prefill_lock:
         _prefill["log"] = []
         _prefill["started_at"] = datetime.utcnow().isoformat()
+        _prefill["status"] = "running"  # "starting" → "running" so the UI poll keeps going
 
     _prefill_log(f"Starting prefill for: {job_dict.get('title', '')} @ {job_dict.get('company', '')}")
 
@@ -486,6 +487,7 @@ def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> No
         uploads = result.get("uploads", 0)
         ats = result.get("ats", "unknown")
         _prefill_log(f"Done ({ats}): {filled} filled, {uploads} uploaded, {skipped} skipped, {errors} errors.")
+        _prefill_log("✓ Prefill complete — browser is open, review and submit the form.")
 
     with _prefill_lock:
         _prefill["status"] = "done"

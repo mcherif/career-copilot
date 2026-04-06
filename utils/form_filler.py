@@ -93,13 +93,21 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["sponsorship"],                  lambda p, j: "no" if not p.get("work_authorization", {}).get("sponsorship_required", True) else "yes"),
     (["require sponsorship"],          lambda p, j: "no" if not p.get("work_authorization", {}).get("sponsorship_required", True) else "yes"),
     (["need sponsorship"],             lambda p, j: "no" if not p.get("work_authorization", {}).get("sponsorship_required", True) else "yes"),
+    # Non-compete / restrictive covenant — always "no"
+    (["non-compete"],                  lambda p, j: "no"),
+    (["noncompete"],                   lambda p, j: "no"),
+    (["restrictive covenant"],         lambda p, j: "no"),
+    (["non-solicitation"],             lambda p, j: "no"),
     (["legally entitled"],             lambda p, j: "yes"),
     (["authorized to work"],           lambda p, j: "yes"),
     (["eligible to work"],             lambda p, j: "yes"),
     (["work authorization"],           lambda p, j: "yes"),
-    # Languages spoken
-    (["language"],                     lambda p, j: ", ".join(p.get("languages", []))),
+    # Human/spoken languages — only when the field is clearly about spoken languages,
+    # NOT programming languages ("experience with the language", "elixir language" etc.)
+    (["what languages", "speak"],      lambda p, j: ", ".join(p.get("languages", []))),
     (["speak fluently"],               lambda p, j: ", ".join(p.get("languages", []))),
+    (["languages do you speak"],       lambda p, j: ", ".join(p.get("languages", []))),
+    (["spoken language"],              lambda p, j: ", ".join(p.get("languages", []))),
 ]
 
 # Timezone label keyword → profile timezone values that match (lowercase)
@@ -900,6 +908,17 @@ def _pick_radio(
         synonyms = _ORIENTATION_SYNONYMS.get(val, [val])
         for i, opt in enumerate(option_labels):
             if _syn_match(synonyms, opt):
+                return i
+        return None
+
+    # Non-compete / NDA / restrictive covenant — always "no".
+    _noncompete_triggers = (
+        "non-compete", "noncompete", "non compete",
+        "restrictive covenant", "non-solicitation",
+    )
+    if any(ph in question_label for ph in _noncompete_triggers):
+        for i, opt in enumerate(option_labels):
+            if opt.lower().strip() == "no":
                 return i
         return None
 
