@@ -107,6 +107,14 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["authorized to work"],           lambda p, j: "yes"),
     (["eligible to work"],             lambda p, j: "yes"),
     (["work authorization"],           lambda p, j: "yes"),
+    # Strongest / preferred programming language
+    # "different from strongest" / "second" → second_language; otherwise strongest_language.
+    # Order matters: more-specific patterns first so they win over broader ones.
+    (["different", "language"],        lambda p, j: p.get("personal", {}).get("second_language", "")),
+    (["second", "language"],           lambda p, j: p.get("personal", {}).get("second_language", "")),
+    (["strongest", "language"],        lambda p, j: p.get("personal", {}).get("strongest_language", "")),
+    (["primary", "language"],          lambda p, j: p.get("personal", {}).get("strongest_language", "")),
+    (["preferred", "language"],        lambda p, j: p.get("personal", {}).get("second_language", "") or p.get("personal", {}).get("strongest_language", "")),
     # Human/spoken languages — only when the field is clearly about spoken languages,
     # NOT programming languages ("experience with the language", "elixir language" etc.)
     (["what languages", "speak"],      lambda p, j: ", ".join(p.get("languages", []))),

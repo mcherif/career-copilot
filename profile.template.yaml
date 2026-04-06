@@ -10,6 +10,8 @@ personal:
   github: "https://github.com/janedoe"
   location: "Toronto, Canada"
   timezone: "EST"
+  strongest_language: "Python"       # used for "strongest programming language" fields
+  second_language: "SQL"             # used for "preferred/second programming language" fields
 
 summary:
   - "Short optional bullets describing seniority, domain strengths, and notable background."
