@@ -608,18 +608,23 @@ async def fill_form(
                                 ).get_by_role("button", name=re.compile(r"enter.?manually", re.I)).first
                             if await manual_btn.count() > 0 and await manual_btn.is_visible():
                                 await manual_btn.click()
-                                # Wait for a textarea to appear (Greenhouse renders it async)
+                                # Wait specifically for the cover-letter textarea to appear.
+                                # Do NOT use "textarea.last" here — other visible textareas
+                                # (e.g. "Why do you want to work here?") would match
+                                # immediately and the cover-letter textarea would be missed.
+                                _cl_ta = page.locator(
+                                    "textarea[id*='cover'], textarea[name*='cover']"
+                                ).first
                                 try:
-                                    await page.locator("textarea").last.wait_for(
-                                        state="visible", timeout=3000
-                                    )
+                                    await _cl_ta.wait_for(state="visible", timeout=4000)
                                 except Exception:
-                                    await page.wait_for_timeout(800)
-                                # Try selectors in priority order; pick any visible textarea
+                                    await page.wait_for_timeout(1000)
+                                # Try selectors in priority order
                                 for ta_loc in [
-                                    page.locator("textarea[name*='cover']").first,
+                                    page.locator("textarea[id='cover_letter_text']").first,
+                                    page.locator("textarea[name='cover_letter_text']").first,
                                     page.locator("textarea[id*='cover']").first,
-                                    page.locator("textarea").last,
+                                    page.locator("textarea[name*='cover']").first,
                                 ]:
                                     try:
                                         if await ta_loc.count() > 0 and await ta_loc.is_visible():

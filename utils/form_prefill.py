@@ -480,17 +480,20 @@ async def _fill_cover_letter_manually(page, job: Dict[str, Any]) -> None:
 
     await manual_btn.click()
 
-    # Wait for the textarea to appear.
+    # Wait specifically for the cover-letter textarea — not "textarea.last"
+    # which would match any already-visible textarea on the page.
+    _cl_ta = page.locator("textarea[id*='cover'], textarea[name*='cover']").first
     try:
-        await page.locator("textarea").last.wait_for(state="visible", timeout=3000)
+        await _cl_ta.wait_for(state="visible", timeout=4000)
     except Exception:
-        await page.wait_for_timeout(800)
+        await page.wait_for_timeout(1000)
 
     # Fill the first matching textarea.
     for ta_loc in [
-        page.locator("textarea[name*='cover']").first,
+        page.locator("textarea[id='cover_letter_text']").first,
+        page.locator("textarea[name='cover_letter_text']").first,
         page.locator("textarea[id*='cover']").first,
-        page.locator("textarea").last,
+        page.locator("textarea[name*='cover']").first,
     ]:
         try:
             if await ta_loc.count() > 0 and await ta_loc.is_visible():
