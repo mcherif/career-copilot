@@ -84,6 +84,9 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["person of color"],  lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
     (["colour"],           lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
     (["color"],            lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
+    (["age group"],        lambda p, j: _age_range(p)),
+    (["age range"],        lambda p, j: _age_range(p)),
+    (["age bracket"],      lambda p, j: _age_range(p)),
     # Work authorization — "legally entitled / authorized / eligible to work"
     # Detect the country from the label and look up the profile value.
     (["legally entitled", "canada"],   lambda p, j: "yes" if p.get("work_authorization", {}).get("canada") else "no"),
@@ -1605,6 +1608,25 @@ async def _select_combobox_option(
 
     await el.press("Escape")
     return None
+
+
+def _age_range(profile: dict) -> str:
+    """Return the standard age-bracket string for the person's age (e.g. '45-54')."""
+    age = profile.get("personal", {}).get("age")
+    if age is None:
+        return ""
+    try:
+        age = int(age)
+    except (TypeError, ValueError):
+        return ""
+    _BRACKETS = [
+        (18, 24, "18-24"), (25, 34, "25-34"), (35, 44, "35-44"),
+        (45, 54, "45-54"), (55, 64, "55-64"), (65, 74, "65-74"),
+    ]
+    for lo, hi, label in _BRACKETS:
+        if lo <= age <= hi:
+            return label
+    return "75 or older" if age >= 75 else ""
 
 
 def _years_label(profile: dict) -> str:

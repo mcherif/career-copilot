@@ -12,6 +12,7 @@ personal:
   timezone: "EST"
   strongest_language: "Python"       # used for "strongest programming language" fields
   second_language: "SQL"             # used for "preferred/second programming language" fields
+  age: 30                            # used to auto-select age-range buckets (18-24, 25-34, … 75+)
 
 summary:
   - "Short optional bullets describing seniority, domain strengths, and notable background."
