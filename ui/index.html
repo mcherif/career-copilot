@@ -159,6 +159,7 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
 .prefill-spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--accent-mid);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0;}
 .prefill-spinner.done{border:none;width:auto;height:auto;animation:none;font-size:13px;}
 #prefillStatusTitle{flex:1;font-weight:600;color:var(--text-secondary);}
+#prefillStatusTitle.filled{color:var(--accent);}
 .prefill-dismiss{background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;padding:0 2px;line-height:1;}
 .prefill-dismiss:hover{color:var(--text-secondary);}
 .btn-prefill-stop{padding:3px 10px;background:var(--red-light);color:var(--red);border:1px solid var(--red-mid);border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:11.5px;font-weight:600;cursor:pointer;}
@@ -404,7 +405,6 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
           <button class="btn-prefill-stop" id="prefillStopBtn" onclick="stopPrefill()" style="display:none">Stop</button>
           <button class="prefill-dismiss" onclick="dismissPrefillStatus()">✕</button>
         </div>
-        <div id="prefillSlowWarning" style="display:none;font-size:11.5px;color:var(--red);margin-bottom:4px;">Taking longer than expected.</div>
         <div class="prefill-log" id="prefillLog"></div>
       </div>
       <div class="action-bar" id="actionBar">
@@ -672,7 +672,7 @@ function copyCover() {
 // ── Prefill status polling ──────────────────────────────────────────────────
 let _prefillPollTimer = null;
 let _prefillStartTime = null;
-const PREFILL_SLOW_THRESHOLD_MS = 60000;
+let _prefillFormFilled = false;   // true once "--- Prefill complete:" appears in log
 
 function _showPrefillStatus(running) {
   const el = document.getElementById('prefillStatus');
@@ -680,16 +680,35 @@ function _showPrefillStatus(running) {
   const icon = document.getElementById('prefillStatusIcon');
   const title = document.getElementById('prefillStatusTitle');
   const stopBtn = document.getElementById('prefillStopBtn');
-  const slowWarn = document.getElementById('prefillSlowWarning');
-  if (icon) {
-    icon.className = running ? 'prefill-spinner' : 'prefill-spinner done';
-    if (!running) icon.textContent = '✓';
+  // Don't overwrite the title/icon if we've already detected form completion.
+  if (!_prefillFormFilled) {
+    if (icon) {
+      icon.className = running ? 'prefill-spinner' : 'prefill-spinner done';
+      if (!running) icon.textContent = '✓';
+    }
+    if (title) {
+      title.textContent = running ? 'Prefill in progress…' : 'Prefill session ended';
+      title.className = '';
+    }
   }
-  if (title) title.textContent = running ? 'Prefill in progress…' : 'Prefill complete';
-  if (!running) {
-    if (stopBtn) stopBtn.style.display = 'none';
-    if (slowWarn) slowWarn.style.display = 'none';
-  }
+  // Stop button: always visible while running (user may want to cancel at any time).
+  if (stopBtn) stopBtn.style.display = running ? '' : 'none';
+}
+
+// Scans the log for the "--- Prefill complete:" sentinel written by _do_fill.
+// When found, immediately updates the header to show a green "Form filled" status
+// so the user knows automation is done even while the browser stays open.
+function _checkPrefillComplete(logs) {
+  if (_prefillFormFilled) return;
+  const doneMsg = (logs || []).find(l => l.includes('--- Prefill complete:'));
+  if (!doneMsg) return;
+  _prefillFormFilled = true;
+  const match = doneMsg.match(/Prefill complete: (.+?)\. Review/);
+  const summary = match ? match[1] : 'form filled';
+  const icon = document.getElementById('prefillStatusIcon');
+  const title = document.getElementById('prefillStatusTitle');
+  if (icon) { icon.className = 'prefill-spinner done'; icon.textContent = '✓'; }
+  if (title) { title.textContent = `Form filled — ${summary}. Review and submit.`; title.className = 'filled'; }
 }
 
 function _updatePrefillLog(lines) {
@@ -713,23 +732,19 @@ async function stopPrefill() {
 
 function _startPrefillPoll() {
   if (_prefillPollTimer) clearInterval(_prefillPollTimer);
+  _prefillFormFilled = false;
   _prefillStartTime = Date.now();
   _showPrefillStatus(true);
   _prefillPollTimer = setInterval(async () => {
     try {
       const s = await api('/api/prefill/status');
       _updatePrefillLog(s.log || []);
+      _checkPrefillComplete(s.log || []);
       const running = s.status === 'running';
-      // Show stop button + slow warning after threshold
-      const elapsed = Date.now() - _prefillStartTime;
-      const stopBtn = document.getElementById('prefillStopBtn');
-      const slowWarn = document.getElementById('prefillSlowWarning');
-      if (running && elapsed > PREFILL_SLOW_THRESHOLD_MS) {
-        if (stopBtn) stopBtn.style.display = '';
-        if (slowWarn) slowWarn.style.display = '';
-      }
       if (!running) {
-        _showPrefillStatus(false);
+        if (!_prefillFormFilled) _showPrefillStatus(false);
+        const stopBtn = document.getElementById('prefillStopBtn');
+        if (stopBtn) stopBtn.style.display = 'none';
         clearInterval(_prefillPollTimer);
         _prefillPollTimer = null;
       }
