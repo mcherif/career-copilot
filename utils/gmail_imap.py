@@ -21,7 +21,6 @@ import email as _email_mod
 import imaplib
 import re
 import time
-from email.header import decode_header as _decode_header
 from typing import Any
 
 
