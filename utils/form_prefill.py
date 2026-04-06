@@ -286,6 +286,13 @@ async def run_prefill_session(
 
 async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: Dict[str, Any], log_fn=None) -> None:
     """Scan and fill all form fields on the current page; update result in place."""
+    def _log(msg: str) -> None:
+        if log_fn:
+            try:
+                log_fn(msg)
+            except Exception:
+                pass
+
     fields, fill_target = await _scan_with_frame_fallback(page)
 
     if not fields:
@@ -324,6 +331,33 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
         except Exception:
             pass
 
+        # Second pass: some ATS forms (e.g. Greenhouse) render additional fields
+        # conditionally after earlier fields are filled — the canonical example is
+        # the "Please identify your race" combobox that only appears after
+        # "Are you Hispanic/Latino?" is answered.  Re-scan and fill any new fields.
+        try:
+            first_ids = {f.get("id") for f in fields if f.get("id")}
+            fields2, fill_target2 = await _scan_with_frame_fallback(page)
+            # Exclude cover_letter_text — it appears after "Enter manually" is
+            # clicked and is already filled; passing it again would cause an
+            # unwanted LLM call or overwrite.
+            new_fields = [
+                f for f in fields2
+                if f.get("id") and f.get("id") not in first_ids
+                and f.get("id") not in ("cover_letter_text",)
+            ]
+            if new_fields:
+                new_labels = [f.get("label") or f.get("id") for f in new_fields]
+                _log(f"Dynamic fields revealed: {new_labels} — filling now…")
+                actions2 = await fill_form(fill_target2, new_fields, profile, job, log_fn=log_fn)
+                result["filled"] += sum(
+                    1 for a in actions2 if a["action"] in ("filled", "checked", "selected")
+                )
+                result["skipped"] += sum(1 for a in actions2 if a["action"] == "skipped")
+                result["errors"] += sum(1 for a in actions2 if a["action"] == "error")
+        except Exception:
+            pass
+
     try:
         await try_upload_resume(fill_target, profile, job)
     except Exception:
@@ -335,6 +369,16 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
             await _fill_cover_letter_manually(fill_target, job)
         except Exception:
             pass
+
+    # All automated filling is now complete.  The browser stays open so the user
+    # can review, fix anything, and click Submit — but no more automation will run.
+    total_filled = result.get("filled", 0)
+    total_skipped = result.get("skipped", 0)
+    _log(
+        f"--- Prefill complete: {total_filled} field(s) set, {total_skipped} skipped."
+        " Review the form in the browser and click Submit when ready."
+        " No further automation will run."
+    )
 
 
 async def _watch_for_ats_and_fill(

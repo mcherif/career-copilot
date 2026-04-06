@@ -486,8 +486,7 @@ def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> No
         errors = result.get("errors", 0)
         uploads = result.get("uploads", 0)
         ats = result.get("ats", "unknown")
-        _prefill_log(f"Done ({ats}): {filled} filled, {uploads} uploaded, {skipped} skipped, {errors} errors.")
-        _prefill_log("✓ Prefill complete — browser is open, review and submit the form.")
+        _prefill_log(f"Session done ({ats}): {filled} filled, {uploads} uploaded, {skipped} skipped, {errors} errors.")
 
     with _prefill_lock:
         _prefill["status"] = "done"

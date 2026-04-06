@@ -285,9 +285,11 @@ async def fill_form(
                 question_batch.append((i, question_text))
 
         if question_batch:
-            _log(f"LLM answering {len(question_batch)} question(s): " +
+            _log(f"LLM working on {len(question_batch)} freeform question(s) — please wait"
+                 " (this takes a few seconds): " +
                  ", ".join(f'"{q[:50]}"' for _, q in question_batch[:5]))
             llm_answers = await generate_answers(question_batch, job, profile)
+            _log(f"LLM done — answers received for {len(question_batch)} question(s).")
 
     # Track text fields that have no meaningful identifier (including those
     # with generic placeholders like "Your answer") so we can fill by position.
