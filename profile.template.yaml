@@ -4,7 +4,8 @@
 personal:
   name: "Jane Doe"
   email: "jane@example.com"
-  phone: "555-0100"
+  phone: "555-0100"              # local number without country code
+  phone_country_code: "1"        # numeric country code — prepended when no separate country field exists
   phone_country: "Canada"
   linkedin: "https://www.linkedin.com/in/janedoe/"
   github: "https://github.com/janedoe"

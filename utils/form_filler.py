@@ -39,7 +39,7 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["last_name"],    lambda p, j: " ".join((p.get("personal", {}).get("name", "") or "").split()[1:])),
     (["name"],         lambda p, j: p.get("personal", {}).get("name", "")),
     (["email"],        lambda p, j: p.get("personal", {}).get("email", "")),
-    (["phone"],        lambda p, j: p.get("personal", {}).get("phone", "")),
+    (["phone"],        lambda p, j: j.get("_phone_value") or p.get("personal", {}).get("phone", "")),
     (["country"],      lambda p, j: p.get("personal", {}).get("phone_country", "") or p.get("personal", {}).get("location", "").split(",")[-1].strip()),
     (["linkedin"],     lambda p, j: p.get("personal", {}).get("linkedin", "")),
     (["portfolio"],    lambda p, j: p.get("personal", {}).get("website", "") or p.get("personal", {}).get("github", "")),
@@ -261,6 +261,20 @@ async def fill_form(
 
     # Build DOM context for anonymous fields once (expensive JS call).
     context_map = await _build_context_map(page, fields)
+
+    # Phone number: if the form has a separate country/country-code field, fill
+    # only the local number in the phone field; otherwise use the full
+    # international number (country code + local).
+    _phone_bare = (profile.get("personal", {}).get("phone") or "").strip()
+    _phone_cc   = str(profile.get("personal", {}).get("phone_country_code") or "").strip()
+    _phone_intl = f"{_phone_cc} {_phone_bare}".strip() if _phone_cc else _phone_bare
+    _has_country_field = any(
+        any(kw in (f.get("label") or "").lower()
+            for kw in ("country", "country code", "phone code", "dial code", "dialing code"))
+        for f in fields
+    )
+    job = dict(job)  # shallow copy so we don't mutate the caller's dict
+    job["_phone_value"] = _phone_bare if _has_country_field else _phone_intl
 
     # Identify freeform question fields and pre-generate LLM answers so
     # every question on the form gets a tailored, role-specific response.
