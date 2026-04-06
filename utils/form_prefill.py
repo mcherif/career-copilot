@@ -250,6 +250,10 @@ async def run_prefill_session(
                 _watch_for_ats_and_fill(active_page, profile, job, result, closed_event, filled_urls, log_fn=_log)
             )
 
+            security_task = asyncio.create_task(
+                _watch_for_security_code(context, profile, closed_event, log_fn=_log)
+            )
+
             # Poll cancel_event every 2s so a stop request closes the browser quickly.
             async def _poll_cancel():
                 while not closed_event.is_set():
@@ -265,8 +269,9 @@ async def run_prefill_session(
                 pass
 
             watch_task.cancel()
+            security_task.cancel()
             cancel_task.cancel()
-            for t in (watch_task, cancel_task):
+            for t in (watch_task, security_task, cancel_task):
                 try:
                     await asyncio.wait_for(t, timeout=2)
                 except (asyncio.CancelledError, asyncio.TimeoutError):
@@ -414,6 +419,123 @@ async def _watch_for_ats_and_fill(
             filled_urls.add(key)
         except Exception:
             pass
+
+
+async def _watch_for_security_code(
+    context,
+    profile: Dict[str, Any],
+    closed_event: asyncio.Event,
+    poll_interval: float = 3.0,
+    log_fn=None,
+) -> None:
+    """Watch all open pages for a Greenhouse security-code field.
+
+    When found, polls Gmail for the code and fills the field automatically.
+    Requires ``credentials.gmail.app_password`` in the profile.
+    """
+    import time
+
+    def _log(msg: str) -> None:
+        if log_fn:
+            try:
+                log_fn(msg)
+            except Exception:
+                pass
+
+    filled_field_keys: set[str] = set()
+
+    gmail_address = (profile.get("personal", {}).get("email") or "").strip()
+    creds = (profile.get("credentials") or {}).get("gmail") or {}
+    app_password = (creds.get("app_password") or "").strip()
+
+    while not closed_event.is_set():
+        await asyncio.sleep(poll_interval)
+        if closed_event.is_set():
+            break
+        try:
+            pages = context.pages
+        except Exception:
+            continue
+
+        for page in pages:
+            if closed_event.is_set():
+                break
+            try:
+                field, field_key = await _find_security_code_input(page)
+                if field is None or field_key in filled_field_keys:
+                    continue
+
+                # We found an unfilled security code field.
+                if not gmail_address or not app_password:
+                    _log(
+                        "Security code field detected — no Gmail App Password configured."
+                        " Enter the code manually (check your email)."
+                    )
+                    filled_field_keys.add(field_key)
+                    continue
+
+                _log("Security code field detected — checking Gmail for code…")
+                from utils.gmail_imap import fetch_greenhouse_security_code
+
+                code = await fetch_greenhouse_security_code(
+                    gmail_address,
+                    app_password,
+                    received_after=time.time() - 120,  # accept emails up to 2 min old
+                )
+
+                if not code:
+                    _log(
+                        "Security code email not received within 3 minutes."
+                        " Please enter the code manually."
+                    )
+                    filled_field_keys.add(field_key)
+                    continue
+
+                _log(f"Security code received ({code}) — filling field…")
+                await field.fill(code)
+                filled_field_keys.add(field_key)
+                _log("Security code filled. Click 'Resubmit' to complete your application.")
+
+            except Exception:
+                pass
+
+
+async def _find_security_code_input(page):
+    """Return (Locator, unique_key) for a visible security-code input, or (None, None)."""
+    _SC_SELECTORS = [
+        'input[name*="security" i]',
+        'input[id*="security" i]',
+        'input[name*="security_code" i]',
+        'input[id*="security_code" i]',
+    ]
+    for sel in _SC_SELECTORS:
+        try:
+            el = page.locator(sel).first
+            if await el.count() > 0 and await el.is_visible(timeout=200):
+                uid = await el.get_attribute("id") or await el.get_attribute("name") or sel
+                key = f"{page.url}::{uid}"
+                return el, key
+        except Exception:
+            continue
+
+    # Broader: any visible text input near "security code" text on the page.
+    try:
+        has_sc_text = await page.locator(
+            "text=/security code/i"
+        ).count()
+        if has_sc_text > 0:
+            # Find the first visible text/tel input that is empty.
+            for sel in ('input[type="text"]', 'input[type="tel"]', 'input:not([type])'):
+                candidate = page.locator(sel).first
+                if await candidate.count() > 0 and await candidate.is_visible(timeout=200):
+                    current_val = await candidate.input_value()
+                    if not current_val:
+                        key = f"{page.url}::text_near_sc"
+                        return candidate, key
+    except Exception:
+        pass
+
+    return None, None
 
 
 def _frame_ats(page) -> str | None:

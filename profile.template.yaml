@@ -87,6 +87,11 @@ resumes:
 # Used by the prefill automation to log in automatically.
 # profile.yaml is git-ignored — credentials are never committed.
 credentials:
+  # Gmail App Password for auto-filling Greenhouse security codes.
+  # Setup: enable IMAP in Gmail → create App Password at
+  # https://myaccount.google.com/apppasswords (requires 2-Step Verification).
+  gmail:
+    app_password: "xxxx xxxx xxxx xxxx"
   himalayas.app:
     email: "jane@example.com"
     password: "your_password"
