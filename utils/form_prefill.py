@@ -455,13 +455,39 @@ async def _fill_cover_letter_manually(page, job: Dict[str, Any]) -> None:
 
     # Find the "Enter manually" button scoped to the cover letter section.
     # Greenhouse forms have two such buttons (resume + cover letter); we must
-    # target the cover-letter-specific one (data-testid="cover_letter-text").
-    manual_btn = page.locator("[data-testid='cover_letter-text']").first
-    if await manual_btn.count() == 0 or not await manual_btn.is_visible(timeout=500):
-        manual_btn = page.get_by_role(
-            "button", name=re.compile(r"enter.?manually", re.I)
-        ).last  # cover letter "Enter manually" is always after the resume one
-    if await manual_btn.count() == 0 or not await manual_btn.is_visible():
+    # target the cover-letter-specific one.  Try progressively broader selectors.
+    manual_btn = None
+    _cl_btn_candidates = [
+        page.locator("[data-testid='cover_letter-text']").first,
+        page.locator("button[data-testid*='cover_letter']").first,
+        page.locator("#cover_letter").locator(
+            "xpath=ancestor::div[contains(@class,'file-upload__wrapper')]"
+        ).get_by_role("button", name=re.compile(r"enter.?manually", re.I)).first,
+        page.locator("#cover_letter").locator(
+            "xpath=ancestor::div[contains(@class,'application-upload') "
+            "or contains(@class,'upload-wrapper') "
+            "or contains(@class,'file-upload')]"
+        ).get_by_role("button", name=re.compile(r"enter.?manually", re.I)).first,
+    ]
+    for _cand in _cl_btn_candidates:
+        try:
+            if await _cand.count() > 0 and await _cand.is_visible(timeout=300):
+                manual_btn = _cand
+                break
+        except Exception:
+            continue
+    # Broad fallback: last "Enter manually" button (CL section follows resume in Greenhouse).
+    if manual_btn is None:
+        _all_manual = page.get_by_role("button", name=re.compile(r"enter.?manually", re.I))
+        _cnt = await _all_manual.count()
+        if _cnt > 0:
+            _cand = _all_manual.nth(_cnt - 1)
+            try:
+                if await _cand.is_visible(timeout=300):
+                    manual_btn = _cand
+            except Exception:
+                pass
+    if manual_btn is None:
         return
 
     # Check if a textarea is already filled (user or earlier run did it).

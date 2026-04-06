@@ -607,19 +607,46 @@ async def fill_form(
                     cl_text = ((job or {}).get("cover_letter") or "").strip()
                     if cl_text:
                         try:
-                            # Prefer the scoped button inside the cover-letter upload
-                            # container (Greenhouse has two "Enter manually" buttons —
-                            # one for resume and one for cover letter).
-                            # data-testid="cover_letter-text" is the specific one.
-                            manual_btn = page.locator("[data-testid='cover_letter-text']").first
-                            if await manual_btn.count() == 0 or not await manual_btn.is_visible(timeout=500):
-                                # Fallback: scope to the file-upload wrapper nearest to cover_letter input.
-                                manual_btn = page.locator(
-                                    "#cover_letter"
-                                ).locator(
+                            # Find the "Enter manually" button for the cover-letter section.
+                            # Greenhouse has two such buttons (resume + CL); we must pick the
+                            # right one.  Try progressively broader selectors.
+                            manual_btn = None
+                            _cl_btn_candidates = [
+                                page.locator("[data-testid='cover_letter-text']").first,
+                                page.locator("button[data-testid*='cover_letter']").first,
+                                # Ancestor traversal from the hidden #cover_letter input
+                                page.locator("#cover_letter").locator(
                                     "xpath=ancestor::div[contains(@class,'file-upload__wrapper')]"
-                                ).get_by_role("button", name=re.compile(r"enter.?manually", re.I)).first
-                            if await manual_btn.count() > 0 and await manual_btn.is_visible():
+                                ).get_by_role("button", name=re.compile(r"enter.?manually", re.I)).first,
+                                page.locator("#cover_letter").locator(
+                                    "xpath=ancestor::div[contains(@class,'application-upload') "
+                                    "or contains(@class,'upload-wrapper') "
+                                    "or contains(@class,'file-upload')]"
+                                ).get_by_role("button", name=re.compile(r"enter.?manually", re.I)).first,
+                            ]
+                            for _cand in _cl_btn_candidates:
+                                try:
+                                    if await _cand.count() > 0 and await _cand.is_visible(timeout=300):
+                                        manual_btn = _cand
+                                        break
+                                except Exception:
+                                    continue
+                            # Broad fallback: take the LAST "Enter manually" button on the page
+                            # (cover letter section always follows the resume section in Greenhouse).
+                            if manual_btn is None:
+                                _all_manual = page.get_by_role(
+                                    "button", name=re.compile(r"enter.?manually", re.I)
+                                )
+                                _cnt = await _all_manual.count()
+                                if _cnt > 0:
+                                    _cand = _all_manual.nth(_cnt - 1)
+                                    try:
+                                        if await _cand.is_visible(timeout=300):
+                                            manual_btn = _cand
+                                    except Exception:
+                                        pass
+                            if manual_btn is not None and await manual_btn.is_visible():
+                                _log("Cover letter: clicking 'Enter manually' button (Strategy 0)")
                                 await manual_btn.click()
                                 # Wait specifically for the cover-letter textarea to appear.
                                 # Do NOT use "textarea.last" here — other visible textareas
@@ -644,9 +671,12 @@ async def fill_form(
                                             await ta_loc.click()
                                             await ta_loc.fill(cl_text)
                                             uploaded = True
+                                            _log("Cover letter: filled via 'Enter manually' textarea (Strategy 0)")
                                             break
                                     except Exception:
                                         continue
+                            else:
+                                _log("Cover letter: 'Enter manually' button not found (Strategy 0 skipped)")
                         except Exception:
                             pass
                 # Strategy 1: click the visible sibling button (Greenhouse pattern).
@@ -656,8 +686,12 @@ async def fill_form(
                 # expect_file_chooser() is a Page method; when fill_target is a
                 # cross-origin Frame (e.g. Greenhouse embed on instacart.careers),
                 # we must use the parent Page to intercept the file chooser.
+                # IMPORTANT: skip Strategies 1 and 2 for cover-letter fields — clicking
+                # the Attach button can leave the OS file dialog open if interception
+                # fails.  Strategy 3 (set_input_files directly on the hidden input) is
+                # safe and sufficient for cover letters.
                 _fc_page = getattr(page, "page", page)
-                if fid and not uploaded:
+                if fid and not uploaded and not is_cover_letter_field:
                     try:
                         # Use Locator (not ElementHandle) so React re-renders
                         # between resume and cover-letter uploads don't cause staleness.
@@ -671,7 +705,7 @@ async def fill_form(
                     except Exception:
                         pass
                 # Strategy 2: click a visible <label for="id"> (some ATSes).
-                if fid and not uploaded:
+                if fid and not uploaded and not is_cover_letter_field:
                     try:
                         lbl = page.locator(f'label[for="{fid}"]:visible').first
                         if await lbl.count() > 0:
@@ -684,11 +718,14 @@ async def fill_form(
                         pass
                 # Strategy 3: direct set_input_files — works for standard visible
                 # inputs and also hidden ones (bypasses visibility via getElementById).
+                # Always safe for cover letters (no OS dialog, no button click needed).
                 if not uploaded:
                     try:
                         if fid:
                             el_loc = page.locator(f'[id="{fid}"]').first
                             if await el_loc.count() > 0:
+                                if is_cover_letter_field:
+                                    _log("Cover letter: uploading PDF via set_input_files (Strategy 3)")
                                 await el_loc.set_input_files(file_path)
                                 uploaded = True
                             else:
@@ -1471,6 +1508,28 @@ async def _select_combobox_option(
         aria_controls = await el.get_attribute("aria-controls") or ""
         opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
 
+    # If typing the full value (e.g. "Tunis, Tunisia") produced no options,
+    # retry with shorter alternatives so the dropdown has something to show:
+    #   1. Country part only: "Tunisia" from "Tunis, Tunisia"
+    #   2. City/first word: "Tunis"
+    # This gives the LLM meaningful options to choose from.
+    if not opts and is_input and ("," in value or " " in value):
+        fallback_terms = []
+        if "," in value:
+            fallback_terms.append(value.split(",")[-1].strip())   # country
+            fallback_terms.append(value.split(",")[0].strip())    # city
+        else:
+            fallback_terms.append(value.split()[0].strip())
+        for term in fallback_terms:
+            if not term:
+                continue
+            await el.fill(term)
+            await asyncio.sleep(0.5)
+            aria_controls = await el.get_attribute("aria-controls") or ""
+            opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
+            if opts:
+                break
+
     if not opts:
         await el.press("Escape")
         return None
@@ -1524,7 +1583,15 @@ async def _select_combobox_option(
         try:
             from utils.form_answers import pick_option as _pick_opt
             opt_texts = [o["text"] for o in opts]
-            chosen_text = await _pick_opt(label_lower, opt_texts, profile, job or {})
+            # For location/country questions, append the candidate's location so
+            # the LLM has enough context to pick the right option (e.g. "Tunisia"
+            # from a region list like "Africa", "EMEA", etc.).
+            llm_question = label_lower
+            if any(kw in label_lower for kw in ("location", "where", "country", "region", "based")):
+                loc = (profile.get("personal") or {}).get("location", "")
+                if loc:
+                    llm_question = f"{label_lower} (candidate location: {loc})"
+            chosen_text = await _pick_opt(llm_question, opt_texts, profile, job or {})
             if chosen_text:
                 chosen_lower = chosen_text.lower()
                 for i, o in enumerate(opts):
