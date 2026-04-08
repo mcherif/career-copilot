@@ -57,6 +57,7 @@ _LISTING_DOMAINS = [
     "arcdev.app",
     "dailyremote.com",
     "nodesk.co",
+    "remote100k.com",
     "himalayas.app",
 ]
 

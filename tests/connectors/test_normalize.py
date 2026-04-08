@@ -196,3 +196,30 @@ class TestNodeskNormalize:
         n = NodeskConnector().normalize(self._raw())
         assert "<p>" not in n["description_text"]
         assert "React" in n["description_text"]
+
+
+# ---------------------------------------------------------------------------
+# Remote100K
+# ---------------------------------------------------------------------------
+
+class TestRemote100kNormalize:
+    def _raw(self):
+        return {
+            "id": "acme-senior-backend-engineer",
+            "url": "https://jobs.ashbyhq.com/acme/abc-123",
+            "title": "Senior Backend Engineer",
+            "company": "Acme",
+            "location": "Worldwide",
+            "description": "Python and Kubernetes role.",
+            "posted_date": datetime(2026, 3, 15, tzinfo=timezone.utc),
+        }
+
+    def test_shape(self):
+        from connectors.remote100k import Remote100kConnector
+        n = Remote100kConnector().normalize(self._raw())
+        _assert_shape(n, "remote100k")
+
+    def test_ats_type_from_apply_url(self):
+        from connectors.remote100k import Remote100kConnector
+        n = Remote100kConnector().normalize(self._raw())
+        assert n["ats_type"] == "ashby"
