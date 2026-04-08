@@ -32,6 +32,7 @@ from connectors.direct_ats import DirectATSConnector
 from connectors.realworkfromanywhere import RealWorkFromAnywhereConnector
 from connectors.euremotejobs import EURemoteJobsConnector
 from connectors.remoteaijobs import RemoteAIJobsConnector
+from connectors.nodesk import NodeskConnector
 from utils.dedup import is_duplicate
 from utils.application_filter import has_already_applied
 from utils.llm_analysis import analyze_job_with_ollama
@@ -62,6 +63,7 @@ CONNECTORS = {
     "realworkfromanywhere": RealWorkFromAnywhereConnector,
     "euremotejobs": EURemoteJobsConnector,
     "remoteaijobs": RemoteAIJobsConnector,
+    "nodesk": NodeskConnector,
 }
 
 # Job listing domains that block Playwright (bot detection / OAuth walls).

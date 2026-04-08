@@ -56,6 +56,7 @@ _LISTING_DOMAINS = [
     "workingnomads.com",
     "arcdev.app",
     "dailyremote.com",
+    "nodesk.co",
     "himalayas.app",
 ]
 
@@ -198,12 +199,19 @@ async def scan_fields(page: Page) -> list[dict]:
                         const lb = document.querySelector('label[for="' + node.id + '"]');
                         if (lb) return lb.innerText.trim();
                     }
-                    // Sibling <label> immediately preceding this container
+                    // Sibling <label> immediately preceding this container.
+                    // Only descend into a sibling with querySelector when the
+                    // sibling has NO form inputs — this prevents picking up the
+                    // label of a completely separate field group that happens to
+                    // precede the current one (e.g. Lever's "Resume/CV" section
+                    // bleeding its label into every subsequent field).
                     let sib = node.previousElementSibling;
                     while (sib) {
                         if (sib.tagName === 'LABEL') return sib.innerText.trim();
-                        const inner = sib.querySelector('label');
-                        if (inner) return inner.innerText.trim();
+                        if (!sib.querySelector('input, textarea, select')) {
+                            const inner = sib.querySelector('label');
+                            if (inner) return inner.innerText.trim();
+                        }
                         sib = sib.previousElementSibling;
                     }
                     node = node.parentElement;
@@ -261,16 +269,18 @@ async def scan_fields(page: Page) -> list[dict]:
                         id,
                         placeholder: '',
                         label,
-                        required: el.getAttribute('aria-required') === 'true',
-                        role: 'combobox',
+                        required: el.required || false,
+                        role: el.getAttribute('role') || '',
                     };
                 })
                 .filter(Boolean);
 
-            return [...fields, ...fields2];
+            return fields.concat(fields2);
         }""")
-        return fields or []
-    except Exception:
+
+        return fields
+    except Exception as e:
+        print(f"[ERROR] scan_fields failed: {e}")
         return []
 
 

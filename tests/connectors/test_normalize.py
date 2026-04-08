@@ -162,3 +162,37 @@ class TestJobspressoNormalize:
         from connectors.jobspresso import JobspressoConnector
         n = JobspressoConnector().normalize(self._raw())
         _assert_shape(n, "jobspresso")
+
+
+# ---------------------------------------------------------------------------
+# NoDesk
+# ---------------------------------------------------------------------------
+
+class TestNodeskNormalize:
+    def _raw(self):
+        return {
+            "id": "kodify-media-group-senior-fullstack-developer",
+            "url": "https://nodesk.co/remote-jobs/kodify-media-group-senior-fullstack-developer/",
+            "title": "Senior Fullstack Developer",
+            "company": "Kodify Media Group",
+            "location": "Worldwide",
+            "description": "<p>React and Node.js role.</p>",
+            "posted_date": datetime(2026, 3, 27, tzinfo=timezone.utc),
+        }
+
+    def test_shape(self):
+        from connectors.nodesk import NodeskConnector
+        n = NodeskConnector().normalize(self._raw())
+        _assert_shape(n, "nodesk")
+
+    def test_title_and_company(self):
+        from connectors.nodesk import NodeskConnector
+        n = NodeskConnector().normalize(self._raw())
+        assert n["title"] == "Senior Fullstack Developer"
+        assert n["company"] == "Kodify Media Group"
+
+    def test_description_text_is_cleaned(self):
+        from connectors.nodesk import NodeskConnector
+        n = NodeskConnector().normalize(self._raw())
+        assert "<p>" not in n["description_text"]
+        assert "React" in n["description_text"]
