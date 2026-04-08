@@ -364,9 +364,10 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
             pass
 
     try:
-        await try_upload_resume(fill_target, profile, job)
-    except Exception:
-        pass
+        upload_result = await try_upload_resume(fill_target, profile, job, log_fn=_log)
+        _log(f"Resume upload result: {upload_result}")
+    except Exception as exc:
+        _log(f"Resume upload error: {exc}")
 
     # Fall back to "Enter manually" only when the PDF file upload didn't succeed.
     if not cl_file_uploaded:

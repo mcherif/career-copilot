@@ -82,6 +82,13 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["salary"], lambda p, j: p.get("preferences", {}).get("rate", "")),
     (["rate"], lambda p, j: p.get("preferences", {}).get("rate", "")),
     (["compensation"], lambda p, j: p.get("preferences", {}).get("rate", "")),
+    # Current employer / company name.
+    (["current company"], lambda p, j: p.get("personal", {}).get("current_company", "")),
+    (["current employer"], lambda p, j: p.get("personal", {}).get("current_company", "")),
+    (["company name"], lambda p, j: p.get("personal", {}).get("current_company", "")),
+    (["organization"], lambda p, j: p.get("personal", {}).get("current_company", "")),
+    # "org" is Lever's name attribute for the current company field.
+    (["org"], lambda p, j: p.get("personal", {}).get("current_company", "")),
     # Cover letter field — use the pre-generated cover letter.
     # Other freeform/motivational textareas get LLM-generated answers at fill-time.
     (["cover letter"], lambda p, j: j.get("cover_letter", "")),
@@ -358,6 +365,11 @@ async def fill_form(
             and not f["id"]
         )
 
+    anon_text_order: list[int] = [i for i, f in enumerate(fields) if _is_anonymous_text(f)]
+    anon_text_position: dict[int, int] = {
+        field_idx: pos for pos, field_idx in enumerate(anon_text_order)
+    }
+
     # Group checkbox/radio fields by their name attribute so we can handle
     # them as question groups (only one JS click per group for radios).
     handled_groups: set[str] = set()
@@ -392,7 +404,13 @@ async def fill_form(
             if ftype == "textarea" and idx in llm_answers:
                 value = llm_answers[idx]
             else:
-                value = _resolve_text_value(label_lower, profile, job)
+                # Belt-and-suspenders: when the field has a descriptive name
+                # attribute (e.g. Lever's name="email", name="urls[LinkedIn]"),
+                # try resolving by name first.  Label detection can return the
+                # wrong label when DOM structure is unusual (e.g. Lever's shifted
+                # field groups).  Name attributes are always reliable.
+                _name_value = _resolve_text_value(_fname_attr.lower(), profile, job) if _fname_attr else ""
+                value = _name_value or _resolve_text_value(label_lower, profile, job)
                 # Fallback: match by placeholder when label gives nothing
                 # (e.g. placeholder="https://www.linkedin.com/in/..." → linkedin rule).
                 if not value and ph_lower and ph_lower not in _GENERIC_PLACEHOLDERS:
@@ -401,21 +419,69 @@ async def fill_form(
                 if not value and idx in llm_answers:
                     value = llm_answers[idx]
 
-            if value:
-                actions.append({
-                    "field": label,
-                    "type": ftype,
-                    "action": "filled",
-                    "value": value,
-                })
-                await _fill_field(page, field, value)
-            else:
-                actions.append({
-                    "field": label,
-                    "type": ftype,
-                    "action": "skipped",
-                    "value": None,
-                })
+            # Last resort for cover-letter-labelled textareas only.
+            # Do NOT fall back to cover letter for arbitrary question textareas
+            # (e.g. "How many years of experience with Golang?").
+            if (not value and ftype == "textarea" and job.get("cover_letter")
+                    and any(kw in label_lower for kw in ("cover letter", "cover_letter", "covering letter"))):
+                value = job["cover_letter"]
+
+            # For anonymous/generic fields fall back to position heuristic.
+            if value == "" and idx in anon_text_position:
+                pos = anon_text_position[idx]
+                if pos == 0:
+                    value = profile.get("personal", {}).get("name", "")
+                elif pos == 1:
+                    value = profile.get("personal", {}).get("email", "")
+
+            if not value:
+                actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
+                                 "action": "skipped", "value": ""})
+                continue
+
+            if not dry_run:
+                # ARIA combobox (react-select etc.): click + pick option.
+                if field.get("role") == "combobox":
+                    try:
+                        chosen = await _select_combobox_option(page, field, value, label_lower, profile=profile, job=job)
+                        if chosen:
+                            actions.append({"field": label or f"anon-text-{idx}", "type": "combobox",
+                                            "action": "selected", "value": chosen})
+                        else:
+                            actions.append({"field": label or f"anon-text-{idx}", "type": "combobox",
+                                            "action": "skipped", "value": f"no option matched {value!r}"})
+                    except Exception as e:
+                        actions.append({"field": label or f"anon-text-{idx}", "type": "combobox",
+                                        "action": "error", "value": str(e)})
+                    continue
+
+                try:
+                    # Anonymous fields have no id/name/label to locate by;
+                    # use placeholder + nth-of-type position instead.
+                    if idx in anon_text_position:
+                        el = await _locate_by_position(page, field, anon_text_position[idx])
+                    else:
+                        el = await _locate_field(page, field)
+                    if el:
+                        # Skip fields that already have a value — the user
+                        # may have filled them manually or a previous pass ran.
+                        existing = (await el.input_value()).strip()
+                        if existing:
+                            actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
+                                            "action": "skipped", "value": f"already filled: {existing[:40]}"})
+                            continue
+                        await el.fill(value, force=True)
+                    else:
+                        actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
+                                        "action": "error", "value": "element not found"})
+                        continue
+                except Exception as e:
+                    actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
+                                    "action": "error", "value": str(e)})
+                    continue
+
+            actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
+                            "action": "filled", "value": value})
 
         # ---- checkboxes ------------------------------------------------
         elif ftype == "checkbox":
@@ -803,6 +869,7 @@ async def try_upload_resume(
     profile: dict,
     job: dict,
     dry_run: bool = False,
+    log_fn=None,
 ) -> str:
     """Attempt to upload the resume via a custom file-picker button (e.g. Notion).
 
@@ -812,6 +879,12 @@ async def try_upload_resume(
 
     Returns a status string: 'uploaded', 'skipped', or an error message.
     """
+    def _log(msg: str) -> None:
+        if log_fn:
+            try:
+                log_fn(msg)
+            except Exception:
+                pass
     resume_path = _resolve_resume_path(profile, job)
     if not resume_path:
         return "skipped (no resume path resolved)"
@@ -826,6 +899,9 @@ async def try_upload_resume(
         "[role='button']:has-text('Upload')",
         "button:has-text('Choose file')",
         "button:has-text('Browse')",
+        "button:has-text('Attach')",          # Lever: "ATTACH RESUME/CV"
+        "label:has-text('Attach')",
+        "[role='button']:has-text('Attach')",
     ]
 
     _fc_page = getattr(page, "page", page)  # Frame → its parent Page
@@ -834,14 +910,41 @@ async def try_upload_resume(
             btn = page.locator(selector).first
             if await btn.count() == 0 or not await btn.is_visible(timeout=300):
                 continue
+            _log(f"Resume upload: clicking '{selector}'")
             async with _fc_page.expect_file_chooser(timeout=5000) as fc_info:
                 await btn.click()
             fc = await fc_info.value
             await fc.set_files(resume_path)
+            _log(f"Resume upload: uploaded via button '{selector}'")
             return f"uploaded {resume_path}"
-        except Exception:
+        except Exception as e:
+            _log(f"Resume upload: '{selector}' failed — {e}")
             continue
 
+    # Fallback: set_input_files directly on a hidden file input.
+    # ATSes like Lever hide the <input type="file"> behind a styled button
+    # (opacity:0), so it never appears in scanned fields and the button click
+    # above may not intercept the chooser reliably.  Playwright's
+    # set_input_files bypasses visibility and works on hidden inputs.
+    # Prefer inputs whose name/accept hints suggest a resume (not cover letter).
+    for file_sel in [
+        "input[type='file'][name*='resume']",
+        "input[type='file'][name*='cv']",
+        "input[type='file'][accept*='pdf']:not([name*='cover'])",
+        "input[type='file']:not([name*='cover']):not([id*='cover'])",
+    ]:
+        try:
+            el = page.locator(file_sel).first
+            if await el.count() > 0:
+                _log(f"Resume upload: set_input_files via '{file_sel}'")
+                await el.set_input_files(resume_path)
+                _log(f"Resume upload: uploaded via hidden input '{file_sel}'")
+                return f"uploaded {resume_path}"
+        except Exception as e:
+            _log(f"Resume upload: '{file_sel}' failed — {e}")
+            continue
+
+    _log("Resume upload: no button or file input found — skipped")
     return "skipped (no upload button found)"
 
 
