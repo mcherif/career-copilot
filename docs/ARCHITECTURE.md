@@ -98,13 +98,15 @@ Sources are implemented as `BaseConnector` subclasses in `connectors/`.
 | `RealWorkFromAnywhereConnector` | [Real Work From Anywhere](https://www.realworkfromanywhere.com) | Worldwide-only curated remote jobs (RSS) |
 | `EURemoteJobsConnector` | [EU Remote Jobs](https://euremotejobs.com) | European timezone remote jobs (RSS, `/job-listings/feed/`) |
 | `RemoteAIJobsConnector` | Real Work From Anywhere — AI category | AI/ML-specific remote jobs (RSS) |
+| `NodeskConnector` | [Nodesk](https://nodesk.co) | Sitemap + JSON-LD; engineering keyword filter on URL slug; skips expired postings |
+| `Remote100kConnector` | [Remote100K](https://remote100k.com) | Sitemap + JSON-LD; ATS apply URL extracted from page HTML; `?ref=` tracking params stripped |
 
 **Direct ATS connectors:**
 
 | Connector | Source | Notes |
 |---|---|---|
 | `DirectATSConnector` | Ashby / Greenhouse / Lever / Workable | Curated `target_companies` list from `profile.yaml`; ATS auto-detected from `careers_url` host |
-| `AshbyConnector` | Ashby API | DB-discovered Ashby boards not in the Direct ATS list |
+| `AshbyConnector` | Ashby API | DB-discovered + curated (`_CURATED_SLUGS`) Ashby boards; seed list ensures coverage from day 1 |
 | `GreenhouseConnector` | Greenhouse API | DB-discovered Greenhouse boards not in the Direct ATS list |
 | `LeverConnector` | Lever API | DB-discovered Lever boards not in the Direct ATS list |
 
@@ -169,12 +171,17 @@ Uses local LLM models through **Ollama** (`/api/chat`):
 `open-job` opens a shortlisted job in a Playwright browser window and:
 
 1. Detects ATS from the job URL (`utils/ats_detector.py`)
-2. Scans visible form fields — captures `tag`, `type`, `name`, `id`, `placeholder`, `label` (via `<label for=...>`, `aria-label`, or `aria-labelledby`)
-3. Builds DOM context for unlabeled fields by walking up the element tree
-4. Fills text fields by matching labels against `_TEXT_RULES` (name, email, phone, LinkedIn, GitHub, location, etc.)
-5. Handles checkboxes (skills, consent, availability) and radio groups (timezone, career type)
-6. Uploads the recommended resume via native file dialog interception
-7. Bot-protected sites (RemoteOK, WeWorkRemotely, Jobicy) open in the system browser without prefill
+2. For listing-page URLs (Nodesk, RemoteOK, etc.) follows the employer apply link via `extract_apply_url` before scanning the form
+3. Scans visible form fields — captures `tag`, `type`, `name`, `id`, `placeholder`, `label` (via `<label for=...>`, `aria-label`, or `aria-labelledby`)
+4. Builds DOM context for unlabeled fields by walking up the element tree (handles Ashby EEO comboboxes and non-native dropdowns)
+5. Fills text fields by matching labels against `_TEXT_RULES` (name, email, phone, LinkedIn, GitHub, location, current company, organization, etc.)
+6. Smart phone formatting: strips non-digits, applies E.164 or national format as required by the field
+7. Age-group dropdowns: selects the matching range from `profile.yaml`
+8. Uses the local LLM to generate answers for freeform textarea questions (motivation, cover letters, custom prompts)
+9. Gmail IMAP interception: polls inbox for ATS verification emails and auto-fills the security code
+10. Handles checkboxes (skills, consent, availability) and radio groups (timezone, career type)
+11. Uploads the recommended resume via native file dialog interception with detailed per-attempt logging
+12. Bot-protected sites (RemoteOK, WeWorkRemotely, Jobicy) open in the system browser without prefill
 
 ### Human Approval Gate
 

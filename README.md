@@ -5,9 +5,9 @@
 
 Career Copilot is an AI-assisted job search operator tool.
 
-It runs a continuous pipeline that ingests remote job listings from 14 sources, scores and filters them against a candidate profile, and surfaces the best matches for human review. The operator interacts with the system through a CLI control surface and a natural language assistant backed by live database access — not a chat interface bolted onto a scraper, but a workflow system with stats, triage queues, shortlists, pipeline control, and ATS-aware application automation.
+It runs a continuous pipeline that ingests remote job listings from 17 sources, scores and filters them against a candidate profile, and surfaces the best matches for human review. The operator interacts with the system through a CLI control surface and a natural language assistant backed by live database access — not a chat interface bolted onto a scraper, but a workflow system with stats, triage queues, shortlists, pipeline control, and ATS-aware application automation.
 
-> **Live dataset** — 1,100+ jobs ingested · 14 active sources · 333 pipeline runs · automated deduplication across all sources
+> **Live dataset** — 1,100+ jobs ingested · 17 active sources · 333 pipeline runs · automated deduplication across all sources
 
 ---
 
@@ -37,7 +37,7 @@ Each job passes through ingestion, deterministic scoring, LLM semantic evaluatio
 
 ## Key Features
 
-- Multi-source job ingestion from 15 sources (job boards + direct ATS APIs)
+- Multi-source job ingestion from 17 sources (job boards + direct ATS APIs + sitemap crawlers)
 - Job deduplication and normalization across all sources
 - Remote eligibility classification with geographic pattern detection
 - Rule-based fit scoring (skill overlap, seniority, title relevance)
@@ -47,6 +47,8 @@ Each job passes through ingestion, deterministic scoring, LLM semantic evaluatio
 - Natural language assistant with live database access and tool calling
 - Resume recommendation engine — best resume selected per job from tagged profiles
 - ATS detection and Playwright-powered form prefill (Greenhouse, Lever, Ashby, Workable)
+- LLM-generated answers for freeform application questions (cover letters, motivation fields)
+- Smart phone/age/current-company field fill and Gmail IMAP security-code interception
 - Scheduled automation via Windows Task Scheduler
 - Email digest reports after each pipeline run
 
@@ -182,8 +184,10 @@ The LLM layer produces structured JSON outputs with defined schemas. Malformed o
 | [Real Work From Anywhere](https://www.realworkfromanywhere.com) | RSS | Worldwide-only curated remote jobs |
 | [EU Remote Jobs](https://euremotejobs.com) | RSS | European timezone remote jobs |
 | Remote AI Jobs | RSS | AI/ML-specific category feed (via Real Work From Anywhere) |
+| [Nodesk](https://nodesk.co) | Sitemap + JSON-LD | Curated remote jobs; engineering keyword filter; expired postings skipped |
+| [Remote100K](https://remote100k.com) | Sitemap + JSON-LD | $100K+ remote jobs; ATS apply URL extracted directly from page HTML |
 | Direct ATS | Multi-API | Curated company list from `profile.yaml` — auto-detects [Ashby](https://ashbyhq.com) / [Greenhouse](https://greenhouse.io) / [Lever](https://lever.co) / [Workable](https://workable.com) |
-| Ashby | JSON API | DB-discovered Ashby boards not already in Direct ATS |
+| Ashby | JSON API | DB-discovered + curated Ashby boards (seed list of verified remote-hiring companies) |
 | Greenhouse | JSON API | DB-discovered Greenhouse boards not already in Direct ATS |
 | Lever | JSON API | DB-discovered Lever boards not already in Direct ATS |
 | [Working Nomads](https://www.workingnomads.com) | JSON API | Disabled by default (Proxify approval required) |
@@ -332,12 +336,15 @@ The default schedule runs at 8am, 12pm, 4pm, and 8pm daily.
 
 `open-job` opens a job in a Playwright browser window and:
 
-1. Navigates to the application form
+1. Navigates to the application form (follows listing-page → employer apply URL for aggregator sources)
 2. Detects the ATS (Greenhouse, Lever, Ashby, etc.)
-3. Prefills fields from your profile (name, email, phone, LinkedIn, GitHub)
-4. Attempts to upload the best-matched resume
-5. Waits for your review — **you submit manually**
-6. Prompts you to mark the job as `applied`
+3. Prefills fields from your profile (name, email, phone, LinkedIn, GitHub, current company, location)
+4. Fills age-group dropdowns, smart-phone-format fields, and EEO/demographic fields automatically
+5. Uses the local LLM to generate answers for freeform questions (motivation, cover letter prompts, custom questions)
+6. Intercepts Gmail IMAP to auto-fill security codes when the ATS sends a verification email
+7. Attempts to upload the best-matched resume
+8. Waits for your review — **you submit manually**
+9. Prompts you to mark the job as `applied`
 
 Bot-protected sites (remoteok.com, weworkremotely.com, jobicy.com) open in your system browser without prefill.
 
