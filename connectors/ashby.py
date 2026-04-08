@@ -18,6 +18,23 @@ logger = setup_logger("ashby_connector")
 BASE_URL = "https://api.ashbyhq.com/posting-api/job-board"
 _SLUG_RE = re.compile(r"ashbyhq\.com/([^/?#]+)")
 
+# Known engineering/AI companies on Ashby whose boards are publicly accessible
+# without authentication.  Verified 2026-04-08 — slugs with 0 remote jobs or
+# 404 are excluded.  The connector also discovers slugs organically from the DB
+# (Ashby URLs ingested by other sources) and from profile.yaml target_companies.
+_CURATED_SLUGS: set[str] = {
+    "cursor",       # Cursor AI — AI coding editor
+    "poolside",     # Poolside — AI coding assistant
+    "linear",       # Linear — dev tools / project management
+    "weaviate",     # Weaviate — vector database
+    "replit",       # Replit — online coding platform
+    "supabase",     # Supabase — open-source Firebase / backend infra
+    "warp",         # Warp — AI terminal
+    "clerk",        # Clerk — auth & identity
+    "ramp",         # Ramp — fintech / spend management
+    "vanta",        # Vanta — security compliance automation
+}
+
 
 def _extract_slug(url: str) -> str | None:
     m = _SLUG_RE.search(url)
@@ -89,13 +106,17 @@ class AshbyConnector(BaseConnector):
 
     def fetch_jobs(self) -> List[Dict[str, Any]]:
         excluded = _load_excluded_slugs()
-        slugs = _load_slugs_from_db() - excluded
+        db_slugs = _load_slugs_from_db() - excluded
+        slugs = db_slugs | (_CURATED_SLUGS - excluded)
 
         if not slugs:
-            logger.info("No Ashby company slugs found — skipping (add companies via profile.yaml or run other sources first)")
+            logger.info("No Ashby company slugs found — skipping")
             return []
 
-        logger.info(f"Fetching jobs from {self.source_name} for {len(slugs)} companies: {sorted(slugs)}")
+        logger.info(
+            f"Fetching jobs from {self.source_name} for {len(slugs)} companies "
+            f"({len(db_slugs)} from DB, {len(_CURATED_SLUGS - excluded)} curated): {sorted(slugs)}"
+        )
         target_roles = _load_target_roles()
         all_jobs: List[Dict[str, Any]] = []
         seen_ids: Set[str] = set()
