@@ -369,7 +369,7 @@ async def update_status(job_id: int, body: StatusUpdate):
         # Close the Playwright browser when the user marks a job as applied,
         # so they can immediately open the next job without hitting the
         # "prefill already running" guard.
-        if body.status == "applied":
+        if body.status in ("applied", "rejected"):
             with _prefill_lock:
                 if _prefill["status"] == "running" and _prefill["job_id"] == job_id:
                     _prefill_cancel.set()

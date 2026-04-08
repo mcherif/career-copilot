@@ -22,13 +22,19 @@ _SYSTEM_PROMPT = (
     "Plain text only — no bullet points, no markdown, no headers."
 )
 
-# Labels that clearly map to standard profile fields — never route to LLM.
+# Labels that clearly map to standard profile fields — never route to LLM
+# for text/url inputs.
 _SKIP_LABELS = {
     "name", "first name", "last name", "full name",
     "email", "phone", "linkedin", "github",
     "salary", "rate",
     "cover letter", "resume", "cv",
 }
+# For textareas we only skip actual document/file fields — NOT profile fields
+# like "linkedin" or "github", because DOM context bleed can make a Kubernetes
+# description textarea look like a LinkedIn field.
+_TEXTAREA_SKIP_LABELS = {"cover letter", "resume", "cv"}
+
 # NOTE: "compensation", "years", "experience", "location", "city", "country"
 # are intentionally NOT here — substring-matching them blocks freeform questions
 # like "3+ years of experience with Python" or "compensation requirements".
@@ -39,16 +45,16 @@ _SKIP_LABELS = {
 def is_llm_question(label_lower: str, ftype: str) -> bool:
     """Return True if this field should receive an LLM-generated answer.
 
-    Textareas are always candidates (except cover-letter fields which are
-    handled by the standard cover_letter rule).  Text/URL inputs only if
-    their label contains a question-like keyword.
+    Textareas are always candidates (except cover-letter/resume fields).
+    Text/URL inputs only if their label contains a question-like keyword.
     """
     if ftype not in ("textarea", "text", "url"):
         return False
+    if ftype == "textarea":
+        # Textareas are always freeform — only skip structural document fields.
+        return not any(skip in label_lower for skip in _TEXTAREA_SKIP_LABELS)
     if any(skip in label_lower for skip in _SKIP_LABELS):
         return False
-    if ftype == "textarea":
-        return True
     question_triggers = [
         "motivation", "why", "what about", "what draws",
         "what excites", "how would", "describe", "tell us",
@@ -117,6 +123,8 @@ def _call_ollama_pick(
         f"sexual_orientation={p.get('sexual_orientation', '')}",
         f"disability={p.get('disability', '')}",
         f"veteran={p.get('veteran', '')}",
+        f"years_experience={p['years_experience']}" if p.get('years_experience') is not None else "",
+        f"age={p['age']}" if p.get('age') is not None else "",
     ]))
     opts_text = "\n".join(f"{i + 1}. {o}" for i, o in enumerate(options))
     prompt = "\n".join([

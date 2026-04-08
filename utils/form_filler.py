@@ -31,110 +31,145 @@ from playwright.async_api import Page
 # ---------------------------------------------------------------------------
 _TEXT_RULES: list[tuple[list[str], Any]] = [
     # First/last name rules must come before the generic "name" rule.
-    (["first name"],   lambda p, j: (p.get("personal", {}).get("name", "") or "").split()[0]),
-    (["firstname"],    lambda p, j: (p.get("personal", {}).get("name", "") or "").split()[0]),
-    (["first_name"],   lambda p, j: (p.get("personal", {}).get("name", "") or "").split()[0]),
-    (["last name"],    lambda p, j: " ".join((p.get("personal", {}).get("name", "") or "").split()[1:])),
-    (["lastname"],     lambda p, j: " ".join((p.get("personal", {}).get("name", "") or "").split()[1:])),
-    (["last_name"],    lambda p, j: " ".join((p.get("personal", {}).get("name", "") or "").split()[1:])),
-    (["name"],         lambda p, j: p.get("personal", {}).get("name", "")),
-    (["email"],        lambda p, j: p.get("personal", {}).get("email", "")),
-    (["phone"],        lambda p, j: j.get("_phone_value") or p.get("personal", {}).get("phone", "")),
-    (["country"],      lambda p, j: p.get("personal", {}).get("phone_country", "") or p.get("personal", {}).get("location", "").split(",")[-1].strip()),
-    (["linkedin"],     lambda p, j: p.get("personal", {}).get("linkedin", "")),
-    (["portfolio"],    lambda p, j: p.get("personal", {}).get("website", "") or p.get("personal", {}).get("github", "")),
-    (["website"],      lambda p, j: p.get("personal", {}).get("website", "") or p.get("personal", {}).get("github", "")),
-    (["github"],       lambda p, j: p.get("personal", {}).get("github", "")),
+    (["first name"], lambda p, j: (
+        p.get("personal", {}).get("name", "") or "").split()[0]),
+    (["firstname"], lambda p, j: (
+        p.get("personal", {}).get("name", "") or "").split()[0]),
+    (["first_name"], lambda p, j: (
+        p.get("personal", {}).get("name", "") or "").split()[0]),
+    (["last name"], lambda p, j: " ".join(
+        (p.get("personal", {}).get("name", "") or "").split()[1:])),
+    (["lastname"], lambda p, j: " ".join(
+        (p.get("personal", {}).get("name", "") or "").split()[1:])),
+    (["last_name"], lambda p, j: " ".join(
+        (p.get("personal", {}).get("name", "") or "").split()[1:])),
+    (["name"], lambda p, j: p.get("personal", {}).get("name", "")),
+    (["email"], lambda p, j: p.get("personal", {}).get("email", "")),
+    (["phone"], lambda p, j: j.get("_phone_value")
+     or p.get("personal", {}).get("phone", "")),
+    (["country"], lambda p, j: p.get("personal", {}).get("phone_country", "")
+     or p.get("personal", {}).get("location", "").split(",")[-1].strip()),
+    (["linkedin"], lambda p, j: p.get("personal", {}).get("linkedin", "")),
+    (["portfolio"], lambda p, j: p.get("personal", {}).get(
+        "website", "") or p.get("personal", {}).get("github", "")),
+    (["website"], lambda p, j: p.get("personal", {}).get(
+        "website", "") or p.get("personal", {}).get("github", "")),
+    (["github"], lambda p, j: p.get("personal", {}).get("github", "")),
     # "Share a link to your portfolio / recent projects" — point to github when no website.
-    (["share", "link"],  lambda p, j: p.get("personal", {}).get("website", "") or p.get("personal", {}).get("github", "")),
-    (["recent project"], lambda p, j: p.get("personal", {}).get("website", "") or p.get("personal", {}).get("github", "")),
-    (["work sample"],    lambda p, j: p.get("personal", {}).get("website", "") or p.get("personal", {}).get("github", "")),
-    (["location", "based"],   lambda p, j: p.get("personal", {}).get("location", "")),
-    (["location"],     lambda p, j: p.get("personal", {}).get("location", "")),
-    (["where"],        lambda p, j: p.get("personal", {}).get("location", "")),
-    (["city"],         lambda p, j: p.get("personal", {}).get("location", "")),
-    (["country"],      lambda p, j: p.get("personal", {}).get("location", "")),
-    (["years of experience"],  lambda p, j: _years_label(p)),
-    (["years experience"],     lambda p, j: _years_label(p)),
-    (["how many years"],       lambda p, j: _years_label(p)),
-    (["years"],                lambda p, j: _years_label(p)),
-    (["start date"],           lambda p, j: _years_label(p)),
-    (["referral", "hear"],    lambda p, j: p.get("preferences", {}).get("referral_source", "internet search")),
-    (["how did you find"],    lambda p, j: p.get("preferences", {}).get("referral_source", "internet search")),
-    (["hear about"],          lambda p, j: p.get("preferences", {}).get("referral_source", "internet search")),
-    (["salary"],       lambda p, j: p.get("preferences", {}).get("rate", "")),
-    (["rate"],         lambda p, j: p.get("preferences", {}).get("rate", "")),
+    (["share", "link"], lambda p, j: p.get("personal", {}).get(
+        "website", "") or p.get("personal", {}).get("github", "")),
+    (["recent project"], lambda p, j: p.get("personal", {}).get(
+        "website", "") or p.get("personal", {}).get("github", "")),
+    (["work sample"], lambda p, j: p.get("personal", {}).get(
+        "website", "") or p.get("personal", {}).get("github", "")),
+    (["location", "based"], lambda p, j: p.get(
+        "personal", {}).get("location", "")),
+    (["location"], lambda p, j: p.get("personal", {}).get("location", "")),
+    (["where"], lambda p, j: p.get("personal", {}).get("location", "")),
+    (["city"], lambda p, j: p.get("personal", {}).get("location", "")),
+    (["country"], lambda p, j: p.get("personal", {}).get("location", "")),
+    (["years of experience"], lambda p, j: _years_label(p)),
+    (["years experience"], lambda p, j: _years_label(p)),
+    (["how many years"], lambda p, j: _years_label(p)),
+    (["years"], lambda p, j: _years_label(p)),
+    (["start date"], lambda p, j: _years_label(p)),
+    (["referral", "hear"], lambda p, j: p.get("preferences", {}).get(
+        "referral_source", "internet search")),
+    (["how did you find"], lambda p, j: p.get("preferences", {}).get(
+        "referral_source", "internet search")),
+    (["hear about"], lambda p, j: p.get("preferences", {}).get(
+        "referral_source", "internet search")),
+    (["salary"], lambda p, j: p.get("preferences", {}).get("rate", "")),
+    (["rate"], lambda p, j: p.get("preferences", {}).get("rate", "")),
     (["compensation"], lambda p, j: p.get("preferences", {}).get("rate", "")),
     # Cover letter field — use the pre-generated cover letter.
     # Other freeform/motivational textareas get LLM-generated answers at fill-time.
-    (["cover letter"],     lambda p, j: j.get("cover_letter", "")),
-    (["gender"],           lambda p, j: p.get("personal", {}).get("gender", "")),
-    (["sex"],              lambda p, j: p.get("personal", {}).get("gender", "")),
-    (["race"],             lambda p, j: p.get("personal", {}).get("race", "")),
-    (["ethnicity"],        lambda p, j: p.get("personal", {}).get("race", "")),
-    (["disability"],       lambda p, j: p.get("personal", {}).get("disability", "")),
-    (["veteran"],          lambda p, j: p.get("personal", {}).get("veteran", "")),
-    (["armed forces"],     lambda p, j: p.get("personal", {}).get("veteran", "")),
-    (["military"],         lambda p, j: p.get("personal", {}).get("veteran", "")),
-    (["sexual orientation"], lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
-    (["lgbtq"],            lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
-    (["lgbtqia"],          lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
-    (["2slgbtqia"],        lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
-    (["person of colour"], lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
-    (["person of color"],  lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
-    (["colour"],           lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
-    (["color"],            lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
-    (["age group"],        lambda p, j: _age_range(p)),
-    (["age range"],        lambda p, j: _age_range(p)),
-    (["age bracket"],      lambda p, j: _age_range(p)),
+    (["cover letter"], lambda p, j: j.get("cover_letter", "")),
+    (["gender"], lambda p, j: p.get("personal", {}).get("gender", "")),
+    (["sex"], lambda p, j: p.get("personal", {}).get("gender", "")),
+    (["race"], lambda p, j: p.get("personal", {}).get("race", "")),
+    (["ethnicity"], lambda p, j: p.get("personal", {}).get("race", "")),
+    (["disability"], lambda p, j: p.get("personal", {}).get("disability", "")),
+    (["veteran"], lambda p, j: p.get("personal", {}).get("veteran", "")),
+    (["armed forces"], lambda p, j: p.get("personal", {}).get("veteran", "")),
+    (["military"], lambda p, j: p.get("personal", {}).get("veteran", "")),
+    (["sexual orientation"], lambda p, j: p.get(
+        "personal", {}).get("sexual_orientation", "")),
+    (["lgbtq"], lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
+    (["lgbtqia"], lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
+    (["2slgbtqia"], lambda p, j: p.get("personal", {}).get("sexual_orientation", "")),
+    (["person of colour"], lambda p, j: p.get(
+        "personal", {}).get("person_of_colour", "")),
+    (["person of color"], lambda p, j: p.get(
+        "personal", {}).get("person_of_colour", "")),
+    (["colour"], lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
+    (["color"], lambda p, j: p.get("personal", {}).get("person_of_colour", "")),
+    (["age group"], lambda p, j: _age_range(p)),
+    (["age range"], lambda p, j: _age_range(p)),
+    (["age bracket"], lambda p, j: _age_range(p)),
     # Work authorization — "legally entitled / authorized / eligible to work"
     # Detect the country from the label and look up the profile value.
-    (["legally entitled", "canada"],   lambda p, j: "yes" if p.get("work_authorization", {}).get("canada") else "no"),
-    (["authorized to work", "canada"], lambda p, j: "yes" if p.get("work_authorization", {}).get("canada") else "no"),
-    (["eligible to work", "canada"],   lambda p, j: "yes" if p.get("work_authorization", {}).get("canada") else "no"),
-    (["legally entitled", "tunisia"],  lambda p, j: "yes" if p.get("work_authorization", {}).get("tunisia") else "no"),
-    (["sponsorship"],                  lambda p, j: "no" if not p.get("work_authorization", {}).get("sponsorship_required", True) else "yes"),
-    (["require sponsorship"],          lambda p, j: "no" if not p.get("work_authorization", {}).get("sponsorship_required", True) else "yes"),
-    (["need sponsorship"],             lambda p, j: "no" if not p.get("work_authorization", {}).get("sponsorship_required", True) else "yes"),
+    (["legally entitled", "canada"], lambda p, j: "yes" if p.get(
+        "work_authorization", {}).get("canada") else "no"),
+    (["authorized to work", "canada"], lambda p, j: "yes" if p.get(
+        "work_authorization", {}).get("canada") else "no"),
+    (["eligible to work", "canada"], lambda p, j: "yes" if p.get(
+        "work_authorization", {}).get("canada") else "no"),
+    (["legally entitled", "tunisia"], lambda p, j: "yes" if p.get(
+        "work_authorization", {}).get("tunisia") else "no"),
+    (["sponsorship"], lambda p, j: "no" if not p.get(
+        "work_authorization", {}).get("sponsorship_required", True) else "yes"),
+    (["require sponsorship"], lambda p, j: "no" if not p.get(
+        "work_authorization", {}).get("sponsorship_required", True) else "yes"),
+    (["need sponsorship"], lambda p, j: "no" if not p.get(
+        "work_authorization", {}).get("sponsorship_required", True) else "yes"),
     # Hispanic / Latino yes-or-no question — derive from profile race.
-    (["hispanic", "latino"],           lambda p, j: "yes" if any(
+    (["hispanic", "latino"], lambda p, j: "yes" if any(
         s in (p.get("personal", {}).get("race") or "").lower()
         for s in ("hispanic", "latino", "latina")
     ) else "no"),
     # Non-compete / restrictive covenant — always "no"
-    (["non-compete"],                  lambda p, j: "no"),
-    (["noncompete"],                   lambda p, j: "no"),
-    (["restrictive covenant"],         lambda p, j: "no"),
-    (["non-solicitation"],             lambda p, j: "no"),
-    (["legally entitled"],             lambda p, j: "yes"),
-    (["authorized to work"],           lambda p, j: "yes"),
-    (["eligible to work"],             lambda p, j: "yes"),
-    (["work authorization"],           lambda p, j: "yes"),
+    (["non-compete"], lambda p, j: "no"),
+    (["noncompete"], lambda p, j: "no"),
+    (["restrictive covenant"], lambda p, j: "no"),
+    (["non-solicitation"], lambda p, j: "no"),
+    (["legally entitled"], lambda p, j: "yes"),
+    (["authorized to work"], lambda p, j: "yes"),
+    (["eligible to work"], lambda p, j: "yes"),
+    (["work authorization"], lambda p, j: "yes"),
     # Strongest / preferred programming language
     # "different from strongest" / "second" → second_language; otherwise strongest_language.
     # Order matters: more-specific patterns first so they win over broader ones.
-    (["different", "language"],        lambda p, j: p.get("personal", {}).get("second_language", "")),
-    (["second", "language"],           lambda p, j: p.get("personal", {}).get("second_language", "")),
-    (["strongest", "language"],        lambda p, j: p.get("personal", {}).get("strongest_language", "")),
-    (["primary", "language"],          lambda p, j: p.get("personal", {}).get("strongest_language", "")),
-    (["preferred", "language"],        lambda p, j: p.get("personal", {}).get("second_language", "") or p.get("personal", {}).get("strongest_language", "")),
+    (["different", "language"], lambda p, j: p.get(
+        "personal", {}).get("second_language", "")),
+    (["second", "language"], lambda p, j: p.get(
+        "personal", {}).get("second_language", "")),
+    (["strongest", "language"], lambda p, j: p.get(
+        "personal", {}).get("strongest_language", "")),
+    (["primary", "language"], lambda p, j: p.get(
+        "personal", {}).get("strongest_language", "")),
+    (["preferred", "language"], lambda p, j: p.get("personal", {}).get(
+        "second_language", "") or p.get("personal", {}).get("strongest_language", "")),
     # Human/spoken languages — only when the field is clearly about spoken languages,
     # NOT programming languages ("experience with the language", "elixir language" etc.)
-    (["what languages", "speak"],      lambda p, j: ", ".join(p.get("languages", []))),
-    (["speak fluently"],               lambda p, j: ", ".join(p.get("languages", []))),
-    (["languages do you speak"],       lambda p, j: ", ".join(p.get("languages", []))),
-    (["spoken language"],              lambda p, j: ", ".join(p.get("languages", []))),
+    (["what languages", "speak"], lambda p, j: ", ".join(p.get("languages", []))),
+    (["speak fluently"], lambda p, j: ", ".join(p.get("languages", []))),
+    (["languages do you speak"], lambda p, j: ", ".join(p.get("languages", []))),
+    (["spoken language"], lambda p, j: ", ".join(p.get("languages", []))),
 ]
 
 # Timezone label keyword → profile timezone values that match (lowercase)
 _TIMEZONE_MATCHES: list[tuple[str, list[str]]] = [
-    ("utc −08", ["los_angeles", "pacific", "pst", "pdt", "pt", "utc-8", "utc-08"]),
+    ("utc −08", ["los_angeles", "pacific",
+     "pst", "pdt", "pt", "utc-8", "utc-08"]),
     ("utc −07", ["denver", "mountain", "mst", "mdt", "utc-7"]),
     ("utc −06", ["chicago", "central", "cst", "cdt", "utc-6"]),
     ("utc −05", ["new_york", "eastern", "est", "edt", "et", "utc-5"]),
     ("utc −04", ["halifax", "atlantic", "ast", "utc-4"]),
-    ("utc ±00", ["london", "gmt", "utc+0", "utc0", "utc±0", "dublin", "lisbon"]),
-    ("utc +01", ["berlin", "paris", "warsaw", "cet", "utc+1", "amsterdam", "tunis"]),
+    ("utc ±00", ["london", "gmt", "utc+0",
+     "utc0", "utc±0", "dublin", "lisbon"]),
+    ("utc +01", ["berlin", "paris", "warsaw",
+     "cet", "utc+1", "amsterdam", "tunis"]),
     ("utc +02", ["istanbul", "eet", "utc+2", "cairo", "bucharest"]),
     ("utc +03", ["moscow", "riyadh", "utc+3", "nairobi"]),
     ("utc +04", ["dubai", "utc+4", "baku"]),
@@ -295,8 +330,11 @@ async def fill_form(
             if len(question_text) < 12:
                 continue
             lbl_check = (f"{ctx_i} {lbl_i}".strip() if ctx_i else lbl_i).lower()
-            # Skip if standard rules already produce a value for this field.
-            if _resolve_text_value(lbl_check, profile, job):
+            # For non-textarea fields: skip if a structured rule produces a value
+            # (e.g. linkedin URL field, email, phone).  Textareas are always LLM
+            # candidates — DOM context can bleed nearby labels (e.g. "linkedin")
+            # into the textarea's effective label, causing wrong rule matches.
+            if ftype_i != "textarea" and _resolve_text_value(lbl_check, profile, job):
                 continue
             if is_llm_question(lbl_check, ftype_i):
                 question_batch.append((i, question_text))
@@ -308,6 +346,7 @@ async def fill_form(
             llm_answers = await generate_answers(question_batch, job, profile)
             _log(f"LLM done — answers received for {len(question_batch)} question(s).")
 
+
     # Track text fields that have no meaningful identifier (including those
     # with generic placeholders like "Your answer") so we can fill by position.
     def _is_anonymous_text(f: dict) -> bool:
@@ -318,11 +357,6 @@ async def fill_form(
             and not f["name"]
             and not f["id"]
         )
-
-    anon_text_order: list[int] = [i for i, f in enumerate(fields) if _is_anonymous_text(f)]
-    anon_text_position: dict[int, int] = {
-        field_idx: pos for pos, field_idx in enumerate(anon_text_order)
-    }
 
     # Group checkbox/radio fields by their name attribute so we can handle
     # them as question groups (only one JS click per group for radios).
@@ -352,86 +386,43 @@ async def fill_form(
 
         # ---- text-like inputs -----------------------------------------
         if ftype in ("text", "email", "tel", "number", "url", "textarea"):
-            value = _resolve_text_value(label_lower, profile, job)
-            # Fallback: match by placeholder when label gives nothing
-            # (e.g. placeholder="https://www.linkedin.com/in/..." → linkedin rule).
-            if not value and ph_lower and ph_lower not in _GENERIC_PLACEHOLDERS:
-                value = _resolve_text_value(ph_lower, profile, job)
-
-            # Fallback: use LLM-generated answer for freeform question fields.
-            if not value and idx in llm_answers:
+            # For textareas: prefer LLM answer first.  DOM context can bleed
+            # labels from adjacent fields (e.g. "linkedin"), causing rule-based
+            # matching to return a LinkedIn URL for a freeform question.
+            if ftype == "textarea" and idx in llm_answers:
                 value = llm_answers[idx]
+            else:
+                value = _resolve_text_value(label_lower, profile, job)
+                # Fallback: match by placeholder when label gives nothing
+                # (e.g. placeholder="https://www.linkedin.com/in/..." → linkedin rule).
+                if not value and ph_lower and ph_lower not in _GENERIC_PLACEHOLDERS:
+                    value = _resolve_text_value(ph_lower, profile, job)
+                # Fallback: use LLM-generated answer for freeform question fields.
+                if not value and idx in llm_answers:
+                    value = llm_answers[idx]
 
-            # Last resort for cover-letter-labelled textareas only.
-            # Do NOT fall back to cover letter for arbitrary question textareas
-            # (e.g. "How many years of experience with Golang?").
-            if (not value and ftype == "textarea" and job.get("cover_letter")
-                    and any(kw in label_lower for kw in ("cover letter", "cover_letter", "covering letter"))):
-                value = job["cover_letter"]
-
-            # For anonymous/generic fields fall back to position heuristic.
-            if value == "" and idx in anon_text_position:
-                pos = anon_text_position[idx]
-                if pos == 0:
-                    value = profile.get("personal", {}).get("name", "")
-                elif pos == 1:
-                    value = profile.get("personal", {}).get("email", "")
-
-            if not value:
-                actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
-                                 "action": "skipped", "value": ""})
-                continue
-
-            if not dry_run:
-                # ARIA combobox (react-select etc.): click + pick option.
-                if field.get("role") == "combobox":
-                    try:
-                        chosen = await _select_combobox_option(page, field, value, label_lower, profile=profile, job=job)
-                        if chosen:
-                            actions.append({"field": label or f"anon-text-{idx}", "type": "combobox",
-                                            "action": "selected", "value": chosen})
-                        else:
-                            actions.append({"field": label or f"anon-text-{idx}", "type": "combobox",
-                                            "action": "skipped", "value": f"no option matched {value!r}"})
-                    except Exception as e:
-                        actions.append({"field": label or f"anon-text-{idx}", "type": "combobox",
-                                        "action": "error", "value": str(e)})
-                    continue
-
-                try:
-                    # Anonymous fields have no id/name/label to locate by;
-                    # use placeholder + nth-of-type position instead.
-                    if idx in anon_text_position:
-                        el = await _locate_by_position(page, field, anon_text_position[idx])
-                    else:
-                        el = await _locate_field(page, field)
-                    if el:
-                        # Skip fields that already have a value — the user
-                        # may have filled them manually or a previous pass ran.
-                        existing = (await el.input_value()).strip()
-                        if existing:
-                            actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
-                                            "action": "skipped", "value": f"already filled: {existing[:40]}"})
-                            continue
-                        await el.fill(value, force=True)
-                    else:
-                        actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
-                                        "action": "error", "value": "element not found"})
-                        continue
-                except Exception as e:
-                    actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
-                                    "action": "error", "value": str(e)})
-                    continue
-
-            actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
-                            "action": "filled", "value": value})
+            if value:
+                actions.append({
+                    "field": label,
+                    "type": ftype,
+                    "action": "filled",
+                    "value": value,
+                })
+                await _fill_field(page, field, value)
+            else:
+                actions.append({
+                    "field": label,
+                    "type": ftype,
+                    "action": "skipped",
+                    "value": None,
+                })
 
         # ---- checkboxes ------------------------------------------------
         elif ftype == "checkbox":
             should_check = _should_check(label_lower, profile, job)
             if should_check is None:
                 actions.append({"field": label, "type": "checkbox",
-                                 "action": "skipped", "value": ""})
+                                "action": "skipped", "value": ""})
                 continue
 
             if not dry_run and should_check:
@@ -461,7 +452,8 @@ async def fill_form(
                 and (f["name"] == fname if fname else f == field)
             ]
             option_labels = [
-                _effective_label(f, context_map.get(fields.index(f), "")).lower()
+                _effective_label(f, context_map.get(
+                    fields.index(f), "")).lower()
                 for f in group_fields
             ]
             chosen = _pick_radio(option_labels, label_lower, profile, job)
@@ -473,7 +465,8 @@ async def fill_form(
             if chosen is None and not dry_run and option_labels:
                 try:
                     from utils.form_answers import pick_option as _pick_opt
-                    _log(f'LLM picking radio for "{(group_display or label_lower)[:60]}"')
+                    _log(
+                        f'LLM picking radio for "{(group_display or label_lower)[:60]}"')
                     chosen_text = await _pick_opt(
                         group_display or label_lower, option_labels, profile, job
                     )
@@ -527,14 +520,14 @@ async def fill_form(
                             try:
                                 await el.select_option(value=value)
                             except Exception:
-                                        # Partial match or gender-synonym match.
+                                # Partial match or gender-synonym match.
                                 # Fetch all options in one JS round-trip.
                                 option_data = await el.evaluate(
                                     "el => Array.from(el.options).map(o => "
                                     "({t: o.text.trim(), v: o.value || o.text.trim()}))"
                                 )
                                 opt_texts = [o["t"] for o in option_data]
-                                opt_vals  = [o["v"] for o in option_data]
+                                opt_vals = [o["v"] for o in option_data]
                                 chosen_val = None
                                 # 1. Simple partial match (e.g. "male" in "Male").
                                 for t, v in zip(opt_texts, opt_vals):
@@ -543,19 +536,28 @@ async def fill_form(
                                         break
                                 # 2. Demographic synonym match (gender, disability, veteran, etc.)
                                 _SELECT_DEMO_MAP = [
-                                    (("gender", "sex"),                                    _GENDER_SYNONYMS),
-                                    (("disability",),                                      _DISABILITY_SYNONYMS),
-                                    (("veteran", "armed forces", "military"),              _VETERAN_SYNONYMS),
-                                    (("sexual orientation", "lgbtq", "lgbtqia", "2slgbtqia"), _ORIENTATION_SYNONYMS),
-                                    (("race", "ethnicity"),                                _RACE_SYNONYMS),
-                                    (("colour", "color", "person of colour", "person of color"), _COLOUR_SYNONYMS),
-                                    (("hear about", "referral source", "how did you find"), _REFERRAL_SYNONYMS),
-                                    (("legally entitled", "authorized to work", "eligible to work", "work authorization", "sponsorship"), _YES_NO_SYNONYMS),
+                                    (("gender", "sex"),
+                                     _GENDER_SYNONYMS),
+                                    (("disability",),
+                                     _DISABILITY_SYNONYMS),
+                                    (("veteran", "armed forces", "military"),
+                                     _VETERAN_SYNONYMS),
+                                    (("sexual orientation", "lgbtq", "lgbtqia",
+                                     "2slgbtqia"), _ORIENTATION_SYNONYMS),
+                                    (("race", "ethnicity"),
+                                     _RACE_SYNONYMS),
+                                    (("colour", "color", "person of colour",
+                                     "person of color"), _COLOUR_SYNONYMS),
+                                    (("hear about", "referral source",
+                                     "how did you find"), _REFERRAL_SYNONYMS),
+                                    (("legally entitled", "authorized to work", "eligible to work",
+                                     "work authorization", "sponsorship"), _YES_NO_SYNONYMS),
                                 ]
                                 if not chosen_val:
                                     for kw_tuple, sdict in _SELECT_DEMO_MAP:
                                         if any(kw in label_lower for kw in kw_tuple):
-                                            synonyms = sdict.get(value.lower(), [value.lower()])
+                                            synonyms = sdict.get(
+                                                value.lower(), [value.lower()])
                                             for syn in synonyms:
                                                 for t, v in zip(opt_texts, opt_vals):
                                                     if syn in t.lower():
@@ -568,8 +570,14 @@ async def fill_form(
                                 if not chosen_val:
                                     try:
                                         from utils.form_answers import pick_option as _pick_opt
-                                        _log(f'LLM picking select option for "{label_lower[:60]}"')
-                                        chosen_text = await _pick_opt(label_lower, opt_texts, profile, job)
+                                        _log(
+                                            f'LLM picking select option for "{label_lower[:60]}"')
+                                        _llm_q = label_lower
+                                        if any(kw in label_lower for kw in ("years", "experience", "how many", "how long")):
+                                            _yrs = (profile.get("personal") or {}).get("years_experience")
+                                            if _yrs is not None:
+                                                _llm_q = f"{label_lower} (candidate has {_yrs}+ years of experience)"
+                                        chosen_text = await _pick_opt(_llm_q, opt_texts, profile, job)
                                         if chosen_text:
                                             for t, v in zip(opt_texts, opt_vals):
                                                 if t.lower() == chosen_text.lower():
@@ -631,8 +639,10 @@ async def fill_form(
                             # right one.  Try progressively broader selectors.
                             manual_btn = None
                             _cl_btn_candidates = [
-                                page.locator("[data-testid='cover_letter-text']").first,
-                                page.locator("button[data-testid*='cover_letter']").first,
+                                page.locator(
+                                    "[data-testid='cover_letter-text']").first,
+                                page.locator(
+                                    "button[data-testid*='cover_letter']").first,
                                 # Ancestor traversal from the hidden #cover_letter input
                                 page.locator("#cover_letter").locator(
                                     "xpath=ancestor::div[contains(@class,'file-upload__wrapper')]"
@@ -665,7 +675,8 @@ async def fill_form(
                                     except Exception:
                                         pass
                             if manual_btn is not None and await manual_btn.is_visible():
-                                _log("Cover letter: clicking 'Enter manually' button (Strategy 0)")
+                                _log(
+                                    "Cover letter: clicking 'Enter manually' button (Strategy 0)")
                                 await manual_btn.click()
                                 # Wait specifically for the cover-letter textarea to appear.
                                 # Do NOT use "textarea.last" here — other visible textareas
@@ -680,22 +691,28 @@ async def fill_form(
                                     await page.wait_for_timeout(1000)
                                 # Try selectors in priority order
                                 for ta_loc in [
-                                    page.locator("textarea[id='cover_letter_text']").first,
-                                    page.locator("textarea[name='cover_letter_text']").first,
-                                    page.locator("textarea[id*='cover']").first,
-                                    page.locator("textarea[name*='cover']").first,
+                                    page.locator(
+                                        "textarea[id='cover_letter_text']").first,
+                                    page.locator(
+                                        "textarea[name='cover_letter_text']").first,
+                                    page.locator(
+                                        "textarea[id*='cover']").first,
+                                    page.locator(
+                                        "textarea[name*='cover']").first,
                                 ]:
                                     try:
                                         if await ta_loc.count() > 0 and await ta_loc.is_visible():
                                             await ta_loc.click()
                                             await ta_loc.fill(cl_text)
                                             uploaded = True
-                                            _log("Cover letter: filled via 'Enter manually' textarea (Strategy 0)")
+                                            _log(
+                                                "Cover letter: filled via 'Enter manually' textarea (Strategy 0)")
                                             break
                                     except Exception:
                                         continue
                             else:
-                                _log("Cover letter: 'Enter manually' button not found (Strategy 0 skipped)")
+                                _log(
+                                    "Cover letter: 'Enter manually' button not found (Strategy 0 skipped)")
                         except Exception:
                             pass
                 # Strategy 1: click the visible sibling button (Greenhouse pattern).
@@ -714,7 +731,8 @@ async def fill_form(
                     try:
                         # Use Locator (not ElementHandle) so React re-renders
                         # between resume and cover-letter uploads don't cause staleness.
-                        btn_loc = page.locator(f'[id="{fid}"]').locator("xpath=../button").first
+                        btn_loc = page.locator(f'[id="{fid}"]').locator(
+                            "xpath=../button").first
                         if await btn_loc.count() > 0 and await btn_loc.is_visible():
                             async with _fc_page.expect_file_chooser(timeout=5000) as fc_info:
                                 await btn_loc.click()
@@ -744,7 +762,8 @@ async def fill_form(
                             el_loc = page.locator(f'[id="{fid}"]').first
                             if await el_loc.count() > 0:
                                 if is_cover_letter_field:
-                                    _log("Cover letter: uploading PDF via set_input_files (Strategy 3)")
+                                    _log(
+                                        "Cover letter: uploading PDF via set_input_files (Strategy 3)")
                                 await el_loc.set_input_files(file_path)
                                 uploaded = True
                             else:
@@ -882,7 +901,8 @@ def _should_check(label_lower: str, profile: dict, job: dict) -> bool | None:
     profile_skills = [s.lower() for s in (profile.get("skills") or [])]
     profile_keywords = [k.lower() for k in (profile.get("keywords") or [])]
     job_title = (job.get("title") or "").lower()
-    job_title_words = set(re.findall(r"\w+", job_title)) - {"sr", "jr", "the", "a", "an"}
+    job_title_words = set(re.findall(r"\w+", job_title)) - \
+        {"sr", "jr", "the", "a", "an"}
 
     # Agreement / consent checkboxes — always check.
     # Normalize apostrophes before matching (curly vs straight).
@@ -891,7 +911,8 @@ def _should_check(label_lower: str, profile: dict, job: dict) -> bool | None:
         return True
 
     # Availability / engagement preferences from profile.
-    availability = [a.lower() for a in (profile.get("preferences", {}).get("availability") or [])]
+    availability = [a.lower() for a in (profile.get(
+        "preferences", {}).get("availability") or [])]
     if availability and any(av in label_lower for av in availability):
         return True
 
@@ -911,7 +932,7 @@ def _should_check(label_lower: str, profile: dict, job: dict) -> bool | None:
     if _is_job_title_label(label_lower):
         _stop = _ROLE_WORDS | _SENIORITY_WORDS | {"the", "a", "an"}
         label_specific = set(re.findall(r"\w+", label_lower)) - _stop
-        job_specific   = job_title_words - _ROLE_WORDS
+        job_specific = job_title_words - _ROLE_WORDS
         if label_specific and job_specific and (label_specific & job_specific):
             return True
         return None  # different role — leave untouched
@@ -931,7 +952,8 @@ def _should_check(label_lower: str, profile: dict, job: dict) -> bool | None:
 
     # Career type — check the developer/engineer option, but not creative
     # hybrids like "Design Engineer (I've mostly coded up my own designs)".
-    _CREATIVE_WORDS = {"design", "pixel", "illustrat", "artist", "3d", "animation"}
+    _CREATIVE_WORDS = {"design", "pixel",
+                       "illustrat", "artist", "3d", "animation"}
     if any(dev in core_label for dev in _DEVELOPER_LABELS):
         if not any(c in core_label for c in _CREATIVE_WORDS):
             return True
@@ -978,7 +1000,8 @@ def _pick_radio(
     if "sexual orientation" in question_label or any(
         kw in q_words for kw in ("lgbtq", "lgbtqia", "2slgbtqia")
     ):
-        val = (profile.get("personal", {}).get("sexual_orientation") or "").lower()
+        val = (profile.get("personal", {}).get(
+            "sexual_orientation") or "").lower()
         synonyms = _ORIENTATION_SYNONYMS.get(val, [val])
         for i, opt in enumerate(option_labels):
             if _syn_match(synonyms, opt):
@@ -1036,7 +1059,8 @@ def _pick_radio(
 
     # Person of colour.
     if any(kw in q_words for kw in ("colour", "color")) or "person of col" in question_label:
-        val = (profile.get("personal", {}).get("person_of_colour") or "").lower()
+        val = (profile.get("personal", {}).get(
+            "person_of_colour") or "").lower()
         synonyms = _COLOUR_SYNONYMS.get(val, [val])
         for i, opt in enumerate(option_labels):
             if _syn_match(synonyms, opt):
@@ -1135,7 +1159,8 @@ async def _build_context_map(page: Page, fields: list[dict]) -> dict[int, str]:
         and f.get("type") not in ("checkbox", "radio")
     ]
     if anon_indices:
-        placeholder = fields[anon_indices[0]].get("placeholder") or "Your answer"
+        placeholder = fields[anon_indices[0]].get(
+            "placeholder") or "Your answer"
         tag = fields[anon_indices[0]].get("tag") or "input"
         try:
             batch: list[str] = await page.evaluate(
@@ -1181,7 +1206,8 @@ async def _build_context_map(page: Page, fields: list[dict]) -> dict[int, str]:
     # ("Which option best describes your gender?").  For ATSes like Ashby the
     # question text lives in a <label for="question_uuid"> where the question
     # UUID is embedded in the radio's name attribute.  Fetch it once per group.
-    radio_groups: dict[str, int] = {}   # name → first field index in that group
+    # name → first field index in that group
+    radio_groups: dict[str, int] = {}
     for idx, f in enumerate(fields):
         if f.get("type") != "radio":
             continue
@@ -1393,7 +1419,8 @@ def _resolve_resume_path(profile: dict, job: dict) -> str:
                     return path
 
     # Score each resume by tag overlap with job title + profile keywords.
-    job_words = set(re.findall(r"\w+", ((job or {}).get("title") or "").lower()))
+    job_words = set(re.findall(
+        r"\w+", ((job or {}).get("title") or "").lower()))
     profile_kws = {k.lower() for k in (profile.get("keywords") or [])}
     combined = job_words | profile_kws
 
@@ -1433,7 +1460,8 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
     if not text:
         return ""
 
-    company_slug = re.sub(r"[^\w-]", "_", ((job or {}).get("company") or "company"))
+    company_slug = re.sub(
+        r"[^\w-]", "_", ((job or {}).get("company") or "company"))
 
     # Prefer PDF (accepted by all major ATSes and has no macro-safety warnings).
     try:
@@ -1511,7 +1539,7 @@ async def _select_combobox_option(
             const root = lb || document;
             return Array.from(root.querySelectorAll('[role="option"]'))
                 .filter(o => { const r = o.getBoundingClientRect();
-                               return r.width > 0 && r.height > 0; })
+                               return r.width >  0 && r.height > 0; })
                 .map(o => ({text: o.innerText.trim(), id: o.id}));
         }"""
 
@@ -1554,7 +1582,7 @@ async def _select_combobox_option(
         return None
 
     val_lower = value.lower()
-    opt_texts_lower = [o["text"].lower() for o in opts]
+    opt_texts_lower = [ o["text"].lower() for o in opts]
 
     # 1. Exact case-insensitive match.
     for i, t in enumerate(opt_texts_lower):
@@ -1564,14 +1592,22 @@ async def _select_combobox_option(
 
     # 2. Demographic synonym match using label-specific dictionaries.
     _DEMO_SYNONYMS: dict[str, tuple[str, ...]] = {
-        ("gender", "sex"):               (_GENDER_SYNONYMS,),     # type: ignore[dict-item]
-        ("disability",):                 (_DISABILITY_SYNONYMS,),  # type: ignore[dict-item]
-        ("veteran", "armed forces", "military"): (_VETERAN_SYNONYMS,),  # type: ignore[dict-item]
-        ("sexual orientation", "lgbtq", "lgbtqia", "2slgbtqia"): (_ORIENTATION_SYNONYMS,),  # type: ignore[dict-item]
-        ("race", "ethnicity", "ethnic"): (_RACE_SYNONYMS,),        # type: ignore[dict-item]
-        ("colour", "color", "person of colour", "person of color"): (_COLOUR_SYNONYMS,),  # type: ignore[dict-item]
-        ("hear about", "how did you find", "referral source", "referral"): (_REFERRAL_SYNONYMS,),  # type: ignore[dict-item]
-        ("legally entitled", "authorized to work", "eligible to work", "work authorization", "sponsorship"): (_YES_NO_SYNONYMS,),  # type: ignore[dict-item]
+        # type: ignore[dict-item]
+        ("gender", "sex"):               (_GENDER_SYNONYMS,),
+        # type: ignore[dict-item]
+        ("disability",):                 (_DISABILITY_SYNONYMS,),
+        # type: ignore[dict-item]
+        ("veteran", "armed forces", "military"): (_VETERAN_SYNONYMS,),
+        # type: ignore[dict-item]
+        ("sexual orientation", "lgbtq", "lgbtqia", "2slgbtqia"): (_ORIENTATION_SYNONYMS,),
+        # type: ignore[dict-item]
+        ("race", "ethnicity", "ethnic"): (_RACE_SYNONYMS,),
+        # type: ignore[dict-item]
+        ("colour", "color", "person of colour", "person of color"): (_COLOUR_SYNONYMS,),
+        # type: ignore[dict-item]
+        ("hear about", "how did you find", "referral source", "referral"): (_REFERRAL_SYNONYMS,),
+        # type: ignore[dict-item]
+        ("legally entitled", "authorized to work", "eligible to work", "work authorization", "sponsorship"): (_YES_NO_SYNONYMS,),
     }
     synonym_dict = None
     for label_keys, (sdict,) in _DEMO_SYNONYMS.items():
@@ -1580,7 +1616,7 @@ async def _select_combobox_option(
             break
 
     if synonym_dict is not None:
-        synonyms = synonym_dict.get(val_lower, [val_lower])
+        synonyms = synonym_dict.get(val_lower, [val_lower]) if isinstance(synonym_dict, dict) else [val_lower]
         for i, t in enumerate(opt_texts_lower):
             opt_words = set(re.findall(r"\w+", t))
             # Each synonym entry can be either a whole-word check or a phrase match.
@@ -1610,6 +1646,10 @@ async def _select_combobox_option(
                 loc = (profile.get("personal") or {}).get("location", "")
                 if loc:
                     llm_question = f"{label_lower} (candidate location: {loc})"
+            elif any(kw in label_lower for kw in ("years", "experience", "how many", "how long")):
+                yrs = (profile.get("personal") or {}).get("years_experience")
+                if yrs is not None:
+                    llm_question = f"{label_lower} (candidate has {yrs}+ years of experience)"
             chosen_text = await _pick_opt(llm_question, opt_texts, profile, job or {})
             if chosen_text:
                 chosen_lower = chosen_text.lower()
@@ -1644,7 +1684,17 @@ def _age_range(profile: dict) -> str:
 
 
 def _years_label(profile: dict) -> str:
-    """Return a plain-text years-of-experience hint from the profile."""
+    """Return a years-of-experience string from the profile.
+
+    Prefers the explicit ``personal.years_experience`` integer (e.g. 20),
+    then falls back to scanning summary lines for a years-containing sentence.
+    """
+    yrs = (profile.get("personal") or {}).get("years_experience")
+    if yrs is not None:
+        try:
+            return str(int(yrs))
+        except (TypeError, ValueError):
+            return str(yrs).strip()
     summary = profile.get("summary") or []
     for line in summary:
         if "year" in str(line).lower():
