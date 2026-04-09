@@ -1,5 +1,20 @@
 # Career Copilot
 
+A local-first AI job search agent that automates the mechanical work between job discovery and application.
+
+## Demo
+
+[![Career Copilot Demo](https://img.youtube.com/vi/0jkhrquK-aU/maxresdefault.jpg)](https://youtu.be/0jkhrquK-aU)
+
+## What Career Copilot Does
+
+• Aggregates remote jobs from 20 sources
+• Deduplicates and filters postings automatically
+• Scores semantic fit with an LLM
+• Generates answers to application questions
+• Automates ATS form filling using Playwright
+• Runs fully locally — no data leaves your machine
+
 [![CI](https://github.com/mcherif/career-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/mcherif/career-copilot/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/mcherif/career-copilot/branch/main/graph/badge.svg)](https://codecov.io/gh/mcherif/career-copilot)
 
