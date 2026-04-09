@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover — apscheduler optional at import time
     BackgroundScheduler = None  # type: ignore[assignment,misc]
     CronTrigger = None  # type: ignore[assignment]
     IntervalTrigger = None  # type: ignore[assignment]
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy import create_engine, func
@@ -433,6 +433,20 @@ def _prefill_log(msg: str) -> None:
     print(entry, flush=True)  # also echo to terminal
 
 
+def _cancel_existing_prefill() -> None:
+    """Signal any running prefill session to stop and reset state.
+
+    Does not wait for the browser thread to exit — the cancel event is
+    enough for run_prefill_session to close the browser on its next await.
+    """
+    _prefill_cancel.set()
+    with _prefill_lock:
+        _prefill["status"] = "idle"
+        _prefill["job_id"] = None
+        _prefill["result"] = None
+        _prefill["log"] = []
+
+
 def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> None:
     with _prefill_lock:
         _prefill["log"] = []
@@ -572,25 +586,21 @@ async def open_job(job_id: int):
     if is_system_browser_domain(job_dict.get("url", "")):
         return {"ok": True, "system_browser": True, "url": job_dict.get("url", "")}
 
+    # Cancel any existing session before starting a new one.
+    _cancel_existing_prefill()
+    _prefill_cancel.clear()
+
     with _prefill_lock:
-        if _prefill["status"] == "running":
-            return {"ok": False, "message": "A prefill session is already running"}
-        _prefill["status"] = "running"
+        _prefill["status"] = "starting"
         _prefill["job_id"] = job_id
         _prefill["result"] = None
-    _prefill_cancel.clear()
+        _prefill["log"] = []
 
     try:
         with open("profile.yaml", encoding="utf-8") as fh:
             profile = yaml.safe_load(fh) or {}
     except Exception:
         profile = {}
-
-    # Clear the log immediately so the UI doesn't show stale entries from
-    # a previous job while the new prefill thread is starting up.
-    with _prefill_lock:
-        _prefill["log"] = []
-        _prefill["status"] = "starting"
 
     threading.Thread(target=_run_prefill_thread, args=(job_dict, profile), daemon=True).start()
     return {"ok": True, "system_browser": False, "message": "Browser opening…"}
@@ -609,3 +619,112 @@ async def stop_prefill():
         if _prefill["status"] == "running":
             _prefill_log("Stop requested by user.")
     return {"ok": True}
+
+
+class DirectFillRequest(BaseModel):
+    url: str
+    title: str = ""
+    company: str = ""
+    description: str = ""
+
+
+@app.post("/api/prefill/url")
+async def prefill_url(body: DirectFillRequest):
+    """Open a browser directly on the provided application URL and fill the form.
+
+    Use this when the real application form URL is known but is behind auth or
+    bot-detection that prevents the normal pipeline from reaching it.
+    The browser opens at the URL; if a login is still required the user can
+    complete it manually before the form is auto-filled.
+    """
+    if not body.url or not body.url.startswith("http"):
+        raise HTTPException(400, "A valid http(s) URL is required")
+
+    # Cancel any existing session before starting a new one.
+    _cancel_existing_prefill()
+    _prefill_cancel.clear()
+
+    with _prefill_lock:
+        _prefill["status"] = "running"
+        _prefill["job_id"] = None
+        _prefill["result"] = None
+        _prefill["log"] = []
+
+    try:
+        with open("profile.yaml", encoding="utf-8") as fh:
+            profile = yaml.safe_load(fh) or {}
+    except Exception:
+        profile = {}
+
+    # Build a synthetic job dict — no DB record needed.
+    job_dict = {
+        "id": None,
+        "url": body.url,
+        "title": body.title or "Direct Fill",
+        "company": body.company or "",
+        "description_text": body.description or "",
+        "source": "direct",
+        "status": "shortlisted",
+        "cover_letter": None,
+    }
+
+    threading.Thread(target=_run_prefill_thread, args=(job_dict, profile), daemon=True).start()
+    return {"ok": True, "message": "Browser opening…"}
+
+
+# ---------------------------------------------------------------------------
+# Resume → profile.yaml parser
+# ---------------------------------------------------------------------------
+
+@app.post("/api/profile/parse-resume")
+async def parse_resume_endpoint(file: UploadFile = File(...)):
+    """Accept a PDF resume upload and return a profile.yaml string.
+
+    The returned YAML is merged into the existing profile.yaml on disk
+    (structural sections like credentials, target_companies, etc. are preserved).
+    The merged result is also written back to profile.yaml.
+    """
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "Only PDF files are accepted")
+
+    import tempfile
+    import os
+    from utils.resume_parser import parse_resume_to_yaml
+
+    # Save upload to a temp file
+    suffix = ".pdf"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        # Load existing profile to preserve structural sections
+        existing: dict = {}
+        try:
+            with open("profile.yaml", encoding="utf-8") as fh:
+                existing = yaml.safe_load(fh) or {}
+        except Exception:
+            pass
+
+        result_yaml, was_reparsed = parse_resume_to_yaml(tmp_path, existing_profile=existing)
+
+        if not was_reparsed:
+            return {"ok": True, "unchanged": True,
+                    "message": "Resume unchanged — profile.yaml not modified"}
+
+        # Write merged result back to profile.yaml
+        try:
+            with open("profile.yaml", "w", encoding="utf-8") as fh:
+                fh.write(result_yaml)
+        except Exception as write_err:
+            return {"ok": False, "error": f"Could not write profile.yaml: {write_err}",
+                    "yaml": result_yaml}
+
+        return {"ok": True, "unchanged": False, "yaml": result_yaml}
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass

@@ -66,10 +66,26 @@ def _job_description(job: Dict[str, Any], max_chars: int = 3500) -> str:
 
 def _candidate_summary(profile: Dict[str, Any]) -> str:
     personal = profile.get("personal", {})
-    preferences = profile.get("preferences", {})
     seniority = profile.get("seniority", {})
 
     summary_lines = []
+
+    # Identity
+    name = str(personal.get("name") or "").strip()
+    current_title = str(personal.get("current_title") or "").strip()
+    current_company = str(personal.get("current_company") or "").strip()
+    years_exp = personal.get("years_experience")
+    id_parts = []
+    if name:
+        id_parts.append(name)
+    if current_title and current_company:
+        id_parts.append(f"{current_title} at {current_company}")
+    elif current_title:
+        id_parts.append(current_title)
+    if years_exp is not None:
+        id_parts.append(f"{years_exp} years experience")
+    if id_parts:
+        summary_lines.append(f"- {', '.join(id_parts)}")
 
     highlights = _string_list(profile.get("summary"), limit=6)
     for highlight in highlights:
@@ -88,32 +104,32 @@ def _candidate_summary(profile: Dict[str, Any]) -> str:
     if keywords:
         summary_lines.append(f"- Focus areas: {', '.join(map(str, keywords))}")
 
+    # Work history — include verbatim so the LLM has real facts to cite
+    work_history = profile.get("work_history", [])
+    if work_history:
+        summary_lines.append("- Work history (use ONLY these facts — do not invent others):")
+        for entry in work_history[:6]:
+            company = str(entry.get("company") or "").strip()
+            title = str(entry.get("title") or "").strip()
+            frm = str(entry.get("from") or "").strip()
+            to = str(entry.get("to") or "present").strip()
+            period = f"{frm}–{to}" if frm else to
+            header = f"  • {company} ({period}): {title}" if company else f"  • {title} ({period})"
+            summary_lines.append(header)
+            for hl in (entry.get("highlights") or [])[:4]:
+                summary_lines.append(f"    – {hl}")
+    else:
+        summary_lines.append(
+            "- Work history: not provided. Do NOT invent company names or specific roles."
+        )
+
     target_roles = profile.get("target_roles", [])[:6]
     if target_roles:
         summary_lines.append(f"- Target roles: {', '.join(map(str, target_roles))}")
 
     preferred_levels = seniority.get("preferred", [])
-    acceptable_levels = seniority.get("acceptable", [])
-    level_parts = []
     if preferred_levels:
-        level_parts.append(f"preferred seniority: {', '.join(map(str, preferred_levels[:4]))}")
-    if acceptable_levels:
-        level_parts.append(f"acceptable seniority: {', '.join(map(str, acceptable_levels[:4]))}")
-    if level_parts:
-        summary_lines.append(f"- {', '.join(level_parts)}")
-
-    accepted_regions = preferences.get("accepted_regions", [])
-    reject_regions = preferences.get("reject_regions", [])
-    contractor_ok = preferences.get("contractor_ok")
-    pref_parts = []
-    if accepted_regions:
-        pref_parts.append(f"preferred regions: {', '.join(map(str, accepted_regions[:6]))}")
-    if reject_regions:
-        pref_parts.append(f"avoid: {', '.join(map(str, reject_regions[:4]))}")
-    if contractor_ok is not None:
-        pref_parts.append(f"contractor_ok: {bool(contractor_ok)}")
-    if pref_parts:
-        summary_lines.append(f"- Preferences: {', '.join(pref_parts)}")
+        summary_lines.append(f"- Seniority: {', '.join(map(str, preferred_levels[:4]))}")
 
     return "\n".join(summary_lines)
 

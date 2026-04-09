@@ -17,8 +17,12 @@ from utils.llm_analysis import _candidate_summary, _job_description
 
 _SYSTEM_PROMPT = (
     "You are helping a job candidate fill out their application. "
-    "Answer the question briefly (2-4 sentences), in first person, "
-    "specific to the role and company. "
+    "Answer the question briefly (2-4 sentences), in first person, specific to the role and company. "
+    "CRITICAL: Only use facts explicitly stated in the candidate profile below. "
+    "Do NOT invent, guess, or embellish any company names, job titles, project names, "
+    "colleagues, specific achievements, or metrics that are not in the profile. "
+    "If the profile lacks enough detail for a specific answer, give a brief, honest "
+    "general answer based only on the skills and experience areas listed. "
     "Plain text only — no bullet points, no markdown, no headers."
 )
 

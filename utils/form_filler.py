@@ -47,6 +47,51 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["email"], lambda p, j: p.get("personal", {}).get("email", "")),
     (["phone"], lambda p, j: j.get("_phone_value")
      or p.get("personal", {}).get("phone", "")),
+    # Work authorization — multi-keyword rules MUST come before single-word
+    # geographic rules like ["country"] and ["location"] so they win when a
+    # question label contains "country" or "location" in a broader context.
+    (["legally entitled", "canada"], lambda p, j: "yes" if p.get(
+        "work_authorization", {}).get("canada") else "no"),
+    (["authorized to work", "canada"], lambda p, j: "yes" if p.get(
+        "work_authorization", {}).get("canada") else "no"),
+    (["eligible to work", "canada"], lambda p, j: "yes" if p.get(
+        "work_authorization", {}).get("canada") else "no"),
+    (["legally entitled", "tunisia"], lambda p, j: "yes" if p.get(
+        "work_authorization", {}).get("tunisia") else "no"),
+    (["sponsorship"], lambda p, j: "no" if not p.get(
+        "work_authorization", {}).get("sponsorship_required", True) else "yes"),
+    (["require sponsorship"], lambda p, j: "no" if not p.get(
+        "work_authorization", {}).get("sponsorship_required", True) else "yes"),
+    (["need sponsorship"], lambda p, j: "no" if not p.get(
+        "work_authorization", {}).get("sponsorship_required", True) else "yes"),
+    # Hispanic / Latino yes-or-no question — derive from profile race.
+    (["hispanic", "latino"], lambda p, j: "yes" if any(
+        s in (p.get("personal", {}).get("race") or "").lower()
+        for s in ("hispanic", "latino", "latina")
+    ) else "no"),
+    # Non-compete / restrictive covenant — always "no"
+    (["non-compete"], lambda p, j: "no"),
+    (["noncompete"], lambda p, j: "no"),
+    (["restrictive covenant"], lambda p, j: "no"),
+    (["non-solicitation"], lambda p, j: "no"),
+    # "Are you legally authorized to work in the country/location in which this role is located?"
+    # Multi-keyword match wins over the single-word ["country"] / ["location"] below.
+    (["authorized to work", "country"], lambda p, j: _auth_for_job_country(p, j)),
+    (["authorized to work", "located"], lambda p, j: _auth_for_job_country(p, j)),
+    (["authorized to work", "location"], lambda p, j: _auth_for_job_country(p, j)),
+    (["eligible to work", "country"], lambda p, j: _auth_for_job_country(p, j)),
+    (["eligible to work", "located"], lambda p, j: _auth_for_job_country(p, j)),
+    (["eligible to work", "location"], lambda p, j: _auth_for_job_country(p, j)),
+    (["legally entitled", "country"], lambda p, j: _auth_for_job_country(p, j)),
+    (["legally entitled", "located"], lambda p, j: _auth_for_job_country(p, j)),
+    (["legally entitled", "location"], lambda p, j: _auth_for_job_country(p, j)),
+    (["legally authorized", "country"], lambda p, j: _auth_for_job_country(p, j)),
+    (["legally authorized", "located"], lambda p, j: _auth_for_job_country(p, j)),
+    (["legally authorized", "location"], lambda p, j: _auth_for_job_country(p, j)),
+    (["legally entitled"], lambda p, j: "yes"),
+    (["authorized to work"], lambda p, j: "yes"),
+    (["eligible to work"], lambda p, j: "yes"),
+    (["work authorization"], lambda p, j: "yes"),
     (["country"], lambda p, j: p.get("personal", {}).get("phone_country", "")
      or p.get("personal", {}).get("location", "").split(",")[-1].strip()),
     (["linkedin"], lambda p, j: p.get("personal", {}).get("linkedin", "")),
@@ -82,6 +127,15 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["salary"], lambda p, j: p.get("preferences", {}).get("rate", "")),
     (["rate"], lambda p, j: p.get("preferences", {}).get("rate", "")),
     (["compensation"], lambda p, j: p.get("preferences", {}).get("rate", "")),
+    # Pronouns
+    (["pronouns"], lambda p, j: p.get("personal", {}).get("pronouns", "")),
+    (["preferred pronouns"], lambda p, j: p.get("personal", {}).get("pronouns", "")),
+    # Current job title / role
+    (["current title"], lambda p, j: p.get("personal", {}).get("current_title", "")),
+    (["current job title"], lambda p, j: p.get("personal", {}).get("current_title", "")),
+    (["current position"], lambda p, j: p.get("personal", {}).get("current_title", "")),
+    (["current role"], lambda p, j: p.get("personal", {}).get("current_title", "")),
+    (["job title"], lambda p, j: p.get("personal", {}).get("current_title", "")),
     # Current employer / company name.
     (["current company"], lambda p, j: p.get("personal", {}).get("current_company", "")),
     (["current employer"], lambda p, j: p.get("personal", {}).get("current_company", "")),
@@ -114,47 +168,6 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["age group"], lambda p, j: _age_range(p)),
     (["age range"], lambda p, j: _age_range(p)),
     (["age bracket"], lambda p, j: _age_range(p)),
-    # Work authorization — "legally entitled / authorized / eligible to work"
-    # Detect the country from the label and look up the profile value.
-    (["legally entitled", "canada"], lambda p, j: "yes" if p.get(
-        "work_authorization", {}).get("canada") else "no"),
-    (["authorized to work", "canada"], lambda p, j: "yes" if p.get(
-        "work_authorization", {}).get("canada") else "no"),
-    (["eligible to work", "canada"], lambda p, j: "yes" if p.get(
-        "work_authorization", {}).get("canada") else "no"),
-    (["legally entitled", "tunisia"], lambda p, j: "yes" if p.get(
-        "work_authorization", {}).get("tunisia") else "no"),
-    (["sponsorship"], lambda p, j: "no" if not p.get(
-        "work_authorization", {}).get("sponsorship_required", True) else "yes"),
-    (["require sponsorship"], lambda p, j: "no" if not p.get(
-        "work_authorization", {}).get("sponsorship_required", True) else "yes"),
-    (["need sponsorship"], lambda p, j: "no" if not p.get(
-        "work_authorization", {}).get("sponsorship_required", True) else "yes"),
-    # Hispanic / Latino yes-or-no question — derive from profile race.
-    (["hispanic", "latino"], lambda p, j: "yes" if any(
-        s in (p.get("personal", {}).get("race") or "").lower()
-        for s in ("hispanic", "latino", "latina")
-    ) else "no"),
-    # Non-compete / restrictive covenant — always "no"
-    (["non-compete"], lambda p, j: "no"),
-    (["noncompete"], lambda p, j: "no"),
-    (["restrictive covenant"], lambda p, j: "no"),
-    (["non-solicitation"], lambda p, j: "no"),
-    # "…authorized to work in the country in which this role is located" —
-    # must come BEFORE the generic catch-alls below so the multi-keyword
-    # match wins.  Delegates to _auth_for_job_country to avoid hardcoding "yes".
-    (["authorized to work", "country"], lambda p, j: _auth_for_job_country(p, j)),
-    (["authorized to work", "located"], lambda p, j: _auth_for_job_country(p, j)),
-    (["eligible to work", "country"], lambda p, j: _auth_for_job_country(p, j)),
-    (["eligible to work", "located"], lambda p, j: _auth_for_job_country(p, j)),
-    (["legally entitled", "country"], lambda p, j: _auth_for_job_country(p, j)),
-    (["legally entitled", "located"], lambda p, j: _auth_for_job_country(p, j)),
-    (["legally authorized", "country"], lambda p, j: _auth_for_job_country(p, j)),
-    (["legally authorized", "located"], lambda p, j: _auth_for_job_country(p, j)),
-    (["legally entitled"], lambda p, j: "yes"),
-    (["authorized to work"], lambda p, j: "yes"),
-    (["eligible to work"], lambda p, j: "yes"),
-    (["work authorization"], lambda p, j: "yes"),
     # Strongest / preferred programming language
     # "different from strongest" / "second" → second_language; otherwise strongest_language.
     # Order matters: more-specific patterns first so they win over broader ones.
@@ -311,6 +324,9 @@ async def fill_form(
                 pass
 
     actions: list[dict] = []
+    # Track uploaded file paths to prevent the same file being uploaded twice
+    # (e.g. resume PDF accidentally filling a mis-detected cover letter field).
+    _uploaded_paths: set[str] = set()
 
     # Build DOM context for anonymous fields once (expensive JS call).
     context_map = await _build_context_map(page, fields)
@@ -581,6 +597,47 @@ async def fill_form(
 
             handled_groups.add(group_key)
 
+        # ---- yes/no button pairs (Ashby and similar) ------------------
+        elif ftype == "yesno":
+            answer = _resolve_text_value(label_lower, profile, job)
+            if not answer:
+                actions.append({"field": label, "type": "yesno",
+                                "action": "skipped", "value": ""})
+                continue
+            btn_text = "Yes" if answer.strip().lower() == "yes" else "No"
+            yesno_idx = field.get("_yesno_index", 0)
+            if not dry_run:
+                try:
+                    await page.evaluate("""([idx, btnTxt]) => {
+                        const btns = Array.from(document.querySelectorAll('button'));
+                        const seen = new Set();
+                        const groups = [];
+                        for (const b of btns) {
+                            if (b.innerText.trim().toLowerCase() !== 'yes') continue;
+                            const p = b.parentElement;
+                            if (!p || seen.has(p)) continue;
+                            const hasNo = Array.from(p.children).some(
+                                el => el.tagName === 'BUTTON' &&
+                                      el.innerText.trim().toLowerCase() === 'no'
+                            );
+                            if (!hasNo) continue;
+                            seen.add(p);
+                            groups.push(p);
+                        }
+                        if (idx >= groups.length) return;
+                        const target = Array.from(
+                            groups[idx].querySelectorAll('button')
+                        ).find(b => b.innerText.trim().toLowerCase() ===
+                                    btnTxt.toLowerCase());
+                        if (target) target.click();
+                    }""", [yesno_idx, btn_text])
+                except Exception as e:
+                    actions.append({"field": label, "type": "yesno",
+                                    "action": "error", "value": str(e)})
+                    continue
+            actions.append({"field": label, "type": "yesno",
+                            "action": "clicked", "value": btn_text})
+
         # ---- select dropdowns -----------------------------------------
         # el.type on a <select> element returns "select-one" or "select-multiple",
         # not "select" — handle all three to avoid silently skipping native dropdowns.
@@ -692,6 +749,41 @@ async def fill_form(
             ) or any(
                 kw in _field_name_lower for kw in ("cover_letter", "coverletter")
             )
+            # DOM ancestry fallback: when static attributes are inconclusive (e.g.
+            # new Greenhouse board uses opaque IDs with no label association),
+            # walk up the DOM from the file input checking for "cover letter" text
+            # in each ancestor's own text nodes and preceding siblings.
+            if not is_cover_letter_field and not dry_run:
+                fid = field.get("id")
+                if fid:
+                    try:
+                        is_cover_letter_field = await page.evaluate("""(fid) => {
+                            const el = document.getElementById(fid);
+                            if (!el) return false;
+                            let node = el.parentElement;
+                            for (let d = 0; d < 8; d++) {
+                                if (!node) break;
+                                const own = Array.from(node.childNodes)
+                                    .filter(n => n.nodeType === Node.TEXT_NODE)
+                                    .map(n => n.textContent).join('') +
+                                    (node.getAttribute('aria-label') || '') +
+                                    (node.getAttribute('data-label') || '');
+                                if (/cover.?letter|covering.?letter/i.test(own))
+                                    return true;
+                                // Also check the heading/label in preceding siblings
+                                let sib = node.previousElementSibling;
+                                let s = 0;
+                                while (sib && s < 3) {
+                                    if (/cover.?letter|covering.?letter/i.test(
+                                            sib.innerText || '')) return true;
+                                    sib = sib.previousElementSibling; s++;
+                                }
+                                node = node.parentElement;
+                            }
+                            return false;
+                        }""", fid)
+                    except Exception:
+                        pass
             if is_cover_letter_field:
                 file_path = _resolve_cover_letter_path(profile, job)
                 skip_reason = "(no cover letter text available)"
@@ -700,6 +792,15 @@ async def fill_form(
                 skip_reason = "(no resume path resolved)"
 
             if file_path and not dry_run:
+                # Deduplicate: skip if this exact file was already uploaded in
+                # this fill_form call (prevents resume PDF being uploaded twice
+                # when cover-letter field detection fails).
+                if file_path in _uploaded_paths:
+                    _log(f"Skipping duplicate upload of {file_path} (already uploaded this session)")
+                    actions.append({"field": label or fname, "type": "file",
+                                    "action": "skipped", "value": f"duplicate: {file_path}",
+                                    "is_cover_letter": is_cover_letter_field})
+                    continue
                 uploaded = False
                 upload_err = ""
                 fid = field.get("id") or ""
@@ -855,6 +956,7 @@ async def fill_form(
                     except Exception as e:
                         upload_err = str(e)
                 if uploaded:
+                    _uploaded_paths.add(file_path)
                     # Brief pause so React can finish re-rendering after the
                     # upload before the next field (e.g. cover letter) is attempted.
                     await page.wait_for_timeout(600)
@@ -1016,6 +1118,49 @@ def _effective_label(field: dict, context: str) -> str:
     return context or ""
 
 
+# Work-auth indicators — if any appear in a label, check for a country name.
+_WA_LABEL_INDICATORS: frozenset[str] = frozenset({
+    "authorized to work", "eligible to work", "legally entitled",
+    "legally authorized", "work authorization",
+})
+
+# Countries and their regex aliases for label-country detection.
+# Ordered longest-first so "united states" is matched before "us".
+_LABEL_COUNTRY_PATTERNS: list[tuple[str, list[str]]] = [
+    ("united states",  [r"united states", r"\busa\b", r"\bu\.s\.a\.?\b", r"\bu\.s\.\b"]),
+    ("united kingdom", [r"united kingdom", r"\bu\.k\.?\b", r"\bgreat britain\b", r"\bbritain\b"]),
+    ("new zealand",    [r"new zealand"]),
+    ("south africa",   [r"south africa"]),
+    ("canada",         [r"\bcanada\b"]),
+    ("australia",      [r"\baustralia\b"]),
+    ("ireland",        [r"\bireland\b"]),
+    ("france",         [r"\bfrance\b"]),
+    ("germany",        [r"\bgermany\b"]),
+    ("netherlands",    [r"\bnetherlands\b", r"\bholland\b"]),
+    ("spain",          [r"\bspain\b"]),
+    ("italy",          [r"\bitaly\b"]),
+    ("portugal",       [r"\bportugal\b"]),
+    ("sweden",         [r"\bsweden\b"]),
+    ("norway",         [r"\bnorway\b"]),
+    ("denmark",        [r"\bdenmark\b"]),
+    ("finland",        [r"\bfinland\b"]),
+    ("switzerland",    [r"\bswitzerland\b"]),
+    ("austria",        [r"\baustria\b"]),
+    ("belgium",        [r"\bbelgium\b"]),
+    ("poland",         [r"\bpoland\b"]),
+    ("india",          [r"\bindia\b"]),
+    ("singapore",      [r"\bsingapore\b"]),
+    ("japan",          [r"\bjapan\b"]),
+    ("brazil",         [r"\bbrazil\b"]),
+    ("mexico",         [r"\bmexico\b"]),
+    ("israel",         [r"\bisrael\b"]),
+    ("argentina",      [r"\bargentina\b"]),
+    ("tunisia",        [r"\btunisia\b"]),
+    ("nigeria",        [r"\bnigeria\b"]),
+    ("kenya",          [r"\bkenya\b"]),
+]
+
+
 def _resolve_text_value(label_lower: str, profile: dict, job: dict) -> str:
     """Match a normalised label against the text rules and return the value.
 
@@ -1023,6 +1168,18 @@ def _resolve_text_value(label_lower: str, profile: dict, job: dict) -> str:
     (e.g. "city" substring-matching inside "ethnicity").
     Multi-word keywords (e.g. "first name") are still matched as substrings.
     """
+    # Pre-pass: if the label is a work-auth question that names a specific country,
+    # check authorization for THAT country rather than the job's location.
+    # This handles "Are you legally authorized to work in the United States?" → "no"
+    # independently of the job's location field.
+    if any(ind in label_lower for ind in _WA_LABEL_INDICATORS):
+        wa = profile.get("work_authorization") or {}
+        _META = {"sponsorship_required"}
+        authorized = {k.lower() for k, v in wa.items() if v and k.lower() not in _META}
+        for canonical, patterns in _LABEL_COUNTRY_PATTERNS:
+            if any(re.search(pat, label_lower) for pat in patterns):
+                return "yes" if canonical in authorized else "no"
+
     label_words = set(re.findall(r"\w+", label_lower))
     for keywords, getter in _TEXT_RULES:
         if all(
@@ -1822,8 +1979,10 @@ def _auth_for_job_country(profile: dict, job: dict) -> str:
     wa = profile.get("work_authorization") or {}
 
     # No country-specific restriction → safe to say yes.
+    # "remote" without a restricting qualifier (e.g. "us only") means the work
+    # is done from the candidate's own country, so authorization is always yes.
     if not location or any(
-        w in location for w in ("worldwide", "anywhere", "global", "remote only")
+        w in location for w in ("worldwide", "anywhere", "global", "remote only", "remote")
     ):
         return "yes"
 

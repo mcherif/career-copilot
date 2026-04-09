@@ -80,9 +80,7 @@ SYSTEM_BROWSER_DOMAINS = {
 
 # Sources disabled from 'all' by default.
 # Enable individually with --source <name>.
-DISABLED_SOURCES = {
-    "workingnomads",   # jobs go via Proxify — requires profile approval before applying
-}
+DISABLED_SOURCES: set[str] = set()
 
 engine = create_engine(config.DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

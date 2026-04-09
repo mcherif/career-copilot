@@ -108,6 +108,7 @@ def test_open_job_starts_prefill_thread(client):
 
 
 def test_open_job_already_running(client):
+    """A new open request while a session is running should cancel it and succeed."""
     tc, mock_session_cls = client
     import ui.app as app_module
     app_module._prefill["status"] = "running"
@@ -122,8 +123,7 @@ def test_open_job_already_running(client):
 
     assert r.status_code == 200
     data = r.json()
-    assert data["ok"] is False
-    assert "already running" in data["message"]
+    assert data["ok"] is True  # cancel-and-replace, not reject
 
 
 def test_open_job_profile_load_failure_uses_empty(client):

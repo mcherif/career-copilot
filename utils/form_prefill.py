@@ -342,6 +342,7 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
             pass
 
     cl_file_uploaded = False
+    resume_uploaded = False
     if fields:
         try:
             actions = await fill_form(fill_target, fields, profile, job, log_fn=log_fn)
@@ -357,6 +358,10 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
                 a.get("action") == "uploaded" and a.get("is_cover_letter")
                 for a in actions
             )
+            resume_uploaded = any(
+                a.get("action") == "uploaded" and not a.get("is_cover_letter")
+                for a in actions
+            )
         except Exception:
             pass
 
@@ -370,10 +375,13 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
             # Exclude cover_letter_text — it appears after "Enter manually" is
             # clicked and is already filled; passing it again would cause an
             # unwanted LLM call or overwrite.
+            # Also exclude file inputs already seen in the first pass — they
+            # would cause a duplicate resume upload.
             new_fields = [
                 f for f in fields2
                 if f.get("id") and f.get("id") not in first_ids
                 and f.get("id") not in ("cover_letter_text",)
+                and not (f.get("type") == "file" and resume_uploaded and not f.get("id", "").startswith("cover"))
             ]
             if new_fields:
                 new_labels = [f.get("label") or f.get("id") for f in new_fields]
@@ -384,14 +392,27 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
                 )
                 result["skipped"] += sum(1 for a in actions2 if a["action"] == "skipped")
                 result["errors"] += sum(1 for a in actions2 if a["action"] == "error")
+                result["uploads"] = result.get("uploads", 0) + sum(
+                    1 for a in actions2 if a["action"] == "uploaded"
+                )
+                if not resume_uploaded:
+                    resume_uploaded = any(
+                        a.get("action") == "uploaded" and not a.get("is_cover_letter")
+                        for a in actions2
+                    )
         except Exception:
             pass
 
-    try:
-        upload_result = await try_upload_resume(fill_target, profile, job, log_fn=_log)
-        _log(f"Resume upload result: {upload_result}")
-    except Exception as exc:
-        _log(f"Resume upload error: {exc}")
+    # Only call try_upload_resume if the resume was NOT already uploaded via
+    # fill_form (prevents double-upload on standard forms with visible file inputs).
+    if not resume_uploaded:
+        try:
+            upload_result = await try_upload_resume(fill_target, profile, job, log_fn=_log)
+            _log(f"Resume upload result: {upload_result}")
+        except Exception as exc:
+            _log(f"Resume upload error: {exc}")
+    else:
+        _log("Resume already uploaded via form fields — skipping try_upload_resume")
 
     # Fall back to "Enter manually" only when the PDF file upload didn't succeed.
     if not cl_file_uploaded:

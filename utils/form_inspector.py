@@ -276,7 +276,44 @@ async def scan_fields(page: Page) -> list[dict]:
                 })
                 .filter(Boolean);
 
-            return fields.concat(fields2);
+            // Pass 3: Yes/No button pairs — Ashby and similar ATSes render boolean
+            // questions as two sibling <button> elements ("Yes" / "No").
+            // These are invisible to the input/select selector above.
+            const capturedIds2 = new Set(
+                fields.concat(fields2).map(f => f.id).filter(Boolean)
+            );
+            const yesNoBtns = Array.from(document.querySelectorAll('button'))
+                .filter(btn => ['yes','no'].includes(btn.innerText.trim().toLowerCase())
+                    && isVisible(btn));
+            const seenYNParents = new Set();
+            const yesNoGroups = [];
+            for (const btn of yesNoBtns) {
+                if (btn.innerText.trim().toLowerCase() !== 'yes') continue;
+                const parent = btn.parentElement;
+                if (!parent || seenYNParents.has(parent)) continue;
+                const hasNo = Array.from(parent.children).some(el =>
+                    el.tagName === 'BUTTON' &&
+                    el.innerText.trim().toLowerCase() === 'no' &&
+                    isVisible(el)
+                );
+                if (!hasNo) continue;
+                if (parent.id && capturedIds2.has(parent.id)) continue;
+                seenYNParents.add(parent);
+                const label = getLabel(parent, parent.id || '');
+                yesNoGroups.push({
+                    tag: 'button',
+                    type: 'yesno',
+                    name: '',
+                    id: parent.id || '',
+                    placeholder: '',
+                    label: label,
+                    required: false,
+                    role: 'group',
+                    _yesno_index: yesNoGroups.length,
+                });
+            }
+
+            return fields.concat(fields2).concat(yesNoGroups);
         }""")
 
         return fields

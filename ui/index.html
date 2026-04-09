@@ -43,9 +43,26 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
 .pill-expired{background:var(--bg-subtle);color:var(--text-muted);}
 .pill-new.active{background:var(--accent-mid);box-shadow:0 0 0 2px var(--accent);}
 .strip-spacer{flex:1;}
+.btn-fill-url{display:flex;align-items:center;gap:6px;padding:7px 13px;background:var(--bg-subtle);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:12.5px;font-weight:600;cursor:pointer;transition:all var(--transition);margin-right:6px;}
+.btn-fill-url:hover{background:var(--bg-card);color:var(--accent);border-color:var(--accent-mid);}
 .btn-pipeline{display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:all var(--transition);box-shadow:var(--shadow-sm);}
 .btn-pipeline:hover{background:#2563eb;box-shadow:0 0 0 3px rgba(59,130,246,.25);}
 .btn-pipeline svg{width:14px;height:14px;}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;backdrop-filter:blur(2px);}
+.modal-box{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg-card);border:1px solid var(--border);border-radius:12px;width:520px;max-width:95vw;box-shadow:0 24px 64px rgba(0,0,0,.6);z-index:301;display:flex;flex-direction:column;}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 12px;border-bottom:1px solid var(--border);}
+.modal-title{font-weight:700;font-size:15px;color:var(--text-primary);}
+.modal-body{padding:18px 20px 8px;display:flex;flex-direction:column;gap:4px;}
+.modal-hint{font-size:12.5px;color:var(--text-muted);line-height:1.6;margin:0 0 12px;}
+.modal-label{font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:3px;}
+.modal-optional{font-weight:400;color:var(--text-muted);}
+.modal-input{width:100%;padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;font-family:inherit;box-sizing:border-box;outline:none;}
+.modal-input:focus{border-color:var(--accent-mid);box-shadow:0 0 0 2px rgba(59,130,246,.15);}
+.modal-footer{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);}
+.btn-modal-cancel{padding:7px 16px;background:var(--bg-subtle);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;}
+.btn-modal-cancel:hover{background:var(--bg-card);}
+.btn-modal-fill{padding:7px 18px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;}
+.btn-modal-fill:hover{background:#2563eb;}
 .btn-pipeline.running{background:#d97706;}
 .pipeline-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:200;opacity:0;pointer-events:none;transition:opacity .25s ease;}
 .pipeline-overlay.open{opacity:1;pointer-events:all;}
@@ -237,6 +254,14 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
     <span>Expired</span><span class="count">—</span>
   </div>
   <div class="strip-spacer"></div>
+  <button class="btn-fill-url" onclick="openFillUrlModal()" title="Fill a known application form URL directly">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+    Fill URL
+  </button>
+  <button class="btn-fill-url" onclick="openParseResumeModal()" title="Parse a PDF resume to generate/update profile.yaml">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    Parse Resume
+  </button>
   <button class="btn-pipeline" id="pipelineBtn" onclick="togglePipeline()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
     Pipeline
@@ -431,6 +456,49 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- Fill URL modal -->
+<div class="modal-overlay" id="fillUrlOverlay" onclick="closeFillUrlModal()" style="display:none"></div>
+<div class="modal-box" id="fillUrlModal" style="display:none">
+  <div class="modal-header">
+    <span class="modal-title">Fill Application URL</span>
+    <button class="btn-close" onclick="closeFillUrlModal()">×</button>
+  </div>
+  <div class="modal-body">
+    <p class="modal-hint">Paste the direct URL of an application form — useful when the job is behind authentication or bot-detection that blocked the pipeline. The browser will open at that URL; you can log in manually if needed, then the form will be auto-filled.</p>
+    <label class="modal-label">Application URL <span style="color:var(--red)">*</span></label>
+    <input class="modal-input" id="fillUrlInput" type="url" placeholder="https://jobs.ashbyhq.com/…/application" />
+    <label class="modal-label" style="margin-top:10px">Company name <span class="modal-optional">(optional — for cover letter)</span></label>
+    <input class="modal-input" id="fillCompanyInput" type="text" placeholder="Acme Corp" />
+    <label class="modal-label" style="margin-top:10px">Job title <span class="modal-optional">(optional)</span></label>
+    <input class="modal-input" id="fillTitleInput" type="text" placeholder="Senior ML Engineer" />
+    <label class="modal-label" style="margin-top:10px">Job description <span class="modal-optional">(optional — for cover letter)</span></label>
+    <textarea class="modal-input" id="fillDescInput" rows="4" placeholder="Paste job description here…" style="resize:vertical;font-family:inherit"></textarea>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-modal-cancel" onclick="closeFillUrlModal()">Cancel</button>
+    <button class="btn-modal-fill" onclick="submitFillUrl()">Open &amp; Fill</button>
+  </div>
+</div>
+
+<!-- Parse Resume modal -->
+<div class="modal-overlay" id="parseResumeOverlay" onclick="closeParseResumeModal()" style="display:none"></div>
+<div class="modal-box" id="parseResumeModal" style="display:none">
+  <div class="modal-header">
+    <span class="modal-title">Parse Resume → profile.yaml</span>
+    <button class="btn-close" onclick="closeParseResumeModal()">×</button>
+  </div>
+  <div class="modal-body">
+    <p class="modal-hint">Upload a PDF resume. The LLM will extract your work history, skills, and profile data and merge it into profile.yaml. Structural sections (credentials, target_companies, resumes, preferences) are preserved.</p>
+    <label class="modal-label">PDF Resume <span style="color:var(--red)">*</span></label>
+    <input class="modal-input" id="parseResumeFile" type="file" accept=".pdf" style="padding:6px" />
+    <div id="parseResumeStatus" style="margin-top:10px;font-size:12px;color:var(--text-secondary);display:none"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-modal-cancel" onclick="closeParseResumeModal()">Cancel</button>
+    <button class="btn-modal-fill" id="parseResumeBtn" onclick="submitParseResume()">Parse &amp; Update</button>
+  </div>
+</div>
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
@@ -780,11 +848,89 @@ async function openApply() {
 async function confirmApplied(didApply) {
   document.getElementById('applyConfirm').classList.remove('show');
   if (didApply) {
+    // Kill the prefill browser session — application is done.
+    try { await fetch('/api/prefill/stop', { method: 'POST' }); } catch(_) {}
     await triageAction('applied');
   }
 }
 
 // ── Pipeline ───────────────────────────────────────────────────────────────
+// ── Fill URL modal ──────────────────────────────────────────────────────────
+function openFillUrlModal() {
+  document.getElementById('fillUrlOverlay').style.display = 'block';
+  document.getElementById('fillUrlModal').style.display = 'flex';
+  document.getElementById('fillUrlInput').focus();
+}
+function closeFillUrlModal() {
+  document.getElementById('fillUrlOverlay').style.display = 'none';
+  document.getElementById('fillUrlModal').style.display = 'none';
+}
+async function submitFillUrl() {
+  const url = document.getElementById('fillUrlInput').value.trim();
+  if (!url.startsWith('http')) { showToast('Please enter a valid URL', 'error'); return; }
+  const company = document.getElementById('fillCompanyInput').value.trim();
+  const title   = document.getElementById('fillTitleInput').value.trim();
+  const description = document.getElementById('fillDescInput').value.trim();
+  closeFillUrlModal();
+  try {
+    const r = await fetch('/api/prefill/url', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ url, company, title, description }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      showToast('Browser opening…', 'info');
+      _startPrefillPoll();
+    } else {
+      showToast(data.message || 'Could not start prefill', 'error');
+    }
+  } catch(e) { showToast('Request failed', 'error'); }
+}
+
+// ── Parse Resume modal ──────────────────────────────────────────────────────
+function openParseResumeModal() {
+  document.getElementById('parseResumeOverlay').style.display = 'block';
+  document.getElementById('parseResumeModal').style.display = 'flex';
+  document.getElementById('parseResumeStatus').style.display = 'none';
+  document.getElementById('parseResumeFile').value = '';
+}
+function closeParseResumeModal() {
+  document.getElementById('parseResumeOverlay').style.display = 'none';
+  document.getElementById('parseResumeModal').style.display = 'none';
+}
+async function submitParseResume() {
+  const fileInput = document.getElementById('parseResumeFile');
+  if (!fileInput.files.length) { showToast('Select a PDF file first', 'error'); return; }
+  const statusEl = document.getElementById('parseResumeStatus');
+  const btn = document.getElementById('parseResumeBtn');
+  statusEl.style.display = 'block';
+  statusEl.textContent = 'Parsing resume… (this may take 30–60 seconds)';
+  btn.disabled = true;
+  const form = new FormData();
+  form.append('file', fileInput.files[0]);
+  try {
+    const r = await fetch('/api/profile/parse-resume', { method: 'POST', body: form });
+    const data = await r.json();
+    if (data.ok) {
+      const msg = data.unchanged
+        ? '✓ Same resume — profile.yaml already up to date.'
+        : '✓ profile.yaml updated successfully.';
+      statusEl.textContent = msg;
+      showToast(data.unchanged ? 'Resume unchanged — no update needed' : 'profile.yaml updated from resume');
+      setTimeout(closeParseResumeModal, 1500);
+    } else {
+      statusEl.textContent = 'Error: ' + (data.error || 'unknown error');
+      showToast('Parse failed', 'error');
+    }
+  } catch(e) {
+    statusEl.textContent = 'Request failed: ' + e.message;
+    showToast('Request failed', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function togglePipeline() {
   document.getElementById('pipelineOverlay').classList.toggle('open');
   document.getElementById('pipelinePanel').classList.toggle('open');

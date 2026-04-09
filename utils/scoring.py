@@ -171,6 +171,57 @@ def _has_title_relevance(title: str, title_skill_matches: list, title_keyword_ma
     role_tokens = ["engineer", "developer", "architect", "specialist", "lead"]
     return any(token in title_lower for token in domain_tokens) and any(token in title_lower for token in role_tokens)
 
+# Languages that may be explicitly required by employers.
+# English is intentionally omitted — it's ubiquitous and nearly always implied.
+# Canonical key must match what the user puts in profile.languages.
+_KNOWN_LANG_NAMES: dict[str, list[str]] = {
+    "mandarin": ["mandarin"],
+    "chinese":  ["chinese", "cantonese"],
+    "japanese": ["japanese"],
+    "korean":   ["korean"],
+    "french":   ["french"],
+    "german":   ["german", "deutsch"],
+    "dutch":    ["dutch"],
+    "spanish":  ["spanish"],
+    "portuguese": ["portuguese"],
+    "italian":  ["italian"],
+    "russian":  ["russian"],
+    "arabic":   ["arabic"],
+    "hindi":    ["hindi"],
+    "hebrew":   ["hebrew"],
+    "turkish":  ["turkish"],
+    "polish":   ["polish"],
+    "swedish":  ["swedish"],
+    "danish":   ["danish"],
+    "norwegian": ["norwegian"],
+    "finnish":  ["finnish"],
+    "thai":     ["thai"],
+    "ukrainian": ["ukrainian"],
+}
+
+# Words that introduce a language requirement; we look for language names
+# within a ±70-character window around each match.
+_LANG_INDICATOR_RE = re.compile(
+    r"\b(?:fluent|native|bilingual|mother.?tongue|proficient|proficiency|"
+    r"language skills?|language requirements?|business.?level|conversational)\b",
+    re.IGNORECASE,
+)
+
+
+def _required_languages_in_text(text: str) -> set[str]:
+    """Return canonical language names that appear in a language-requirement context."""
+    text_lower = text.lower()
+    found: set[str] = set()
+    for m in _LANG_INDICATOR_RE.finditer(text_lower):
+        start = max(0, m.start() - 70)
+        end = min(len(text_lower), m.end() + 70)
+        window = text_lower[start:end]
+        for lang, aliases in _KNOWN_LANG_NAMES.items():
+            if any(re.search(r"\b" + alias + r"\b", window) for alias in aliases):
+                found.add(lang)
+    return found
+
+
 def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
     """Evaluates a job against a user profile using deterministic rules.
     
@@ -205,6 +256,15 @@ def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
         return result
 
     if any(kw in title for kw in TITLE_REJECT_KEYWORDS):
+        result["recommended_status"] = "rejected"
+        return result
+
+    # Hard reject: job explicitly requires a language the candidate doesn't speak.
+    # Detect patterns like "fluent mandarin", "japanese speaker", "bilingual chinese".
+    profile_langs = {str(lang).strip().lower() for lang in (profile or {}).get("languages", [])}
+    _scan_text = title + " " + description[:2_000]
+    _required_langs = _required_languages_in_text(_scan_text)
+    if _required_langs - profile_langs:
         result["recommended_status"] = "rejected"
         return result
 
