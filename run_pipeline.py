@@ -625,17 +625,35 @@ def rescore(profile: str, status: str):
     candidate_profile = _load_profile(profile)
     session = SessionLocal()
     try:
+        from utils.scoring import _NO_DIRECT_APPLY_SOURCES
         jobs = session.query(Job).filter(Job.status == status).all()
         rejected = 0
+        downgraded = 0
         for job in jobs:
             job_dict = {c.name: getattr(job, c.name) for c in job.__table__.columns}
             result = score_job(job_dict, candidate_profile)
-            if result["recommended_status"] == "rejected":
+            new_status = result["recommended_status"]
+            if new_status == "rejected":
                 job.status = "rejected"
                 job.fit_score = result["fit_score"]
                 rejected += 1
+            elif (
+                status == "shortlisted"
+                and new_status == "review"
+                and str(job_dict.get("source", "")).lower() in _NO_DIRECT_APPLY_SOURCES
+            ):
+                # Downgrade shortlisted → review only for sources that have no direct apply path.
+                # Score regressions alone are not enough — LLM/manual promotions are preserved.
+                job.status = "review"
+                job.fit_score = result["fit_score"]
+                downgraded += 1
         session.commit()
-        click.echo(f"Rescored {len(jobs)} '{status}' jobs: {rejected} newly rejected, {len(jobs) - rejected} kept.")
+        kept = len(jobs) - rejected - downgraded
+        msg = f"Rescored {len(jobs)} '{status}' jobs: {rejected} rejected"
+        if downgraded:
+            msg += f", {downgraded} downgraded to review"
+        msg += f", {kept} kept."
+        click.echo(msg)
     finally:
         session.close()
 

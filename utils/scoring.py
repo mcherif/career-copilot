@@ -2,6 +2,12 @@ import re
 from typing import Dict, Any
 from utils.remote_filter import classify_remote_eligibility
 
+# Sources that require a paid subscription or don't have a direct apply URL.
+# Jobs from these sources are capped at 'review' so they never reach shortlisted.
+_NO_DIRECT_APPLY_SOURCES: frozenset[str] = frozenset({
+    "weworkremotely",  # subscription required to view full job / apply
+})
+
 TITLE_REJECT_KEYWORDS = [
     # Sales / BD
     "sales manager", "sales director", "sales executive", "sales representative",
@@ -298,5 +304,11 @@ def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
         result["recommended_status"] = "review"
     else:
         result["recommended_status"] = "rejected"
-        
+
+    # Sources without a direct apply path are capped at review so they never
+    # reach the shortlist (no point surfacing jobs we can't act on).
+    source = str(job.get("source", "")).lower()
+    if source in _NO_DIRECT_APPLY_SOURCES and result["recommended_status"] == "shortlisted":
+        result["recommended_status"] = "review"
+
     return result
