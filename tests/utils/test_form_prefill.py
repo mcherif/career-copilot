@@ -12,25 +12,11 @@ JOB = {"id": 1, "title": "SWE", "company": "Acme", "url": "https://jobs.ashbyhq.
 PROFILE = {"name": "Jane Doe", "email": "jane@example.com"}
 
 
-def _make_context():
-    """Return a mock BrowserContext that records new-page callbacks."""
-    ctx = MagicMock()
-    _callbacks = {}
-
-    def _on(event, cb):
-        _callbacks.setdefault(event, []).append(cb)
-
-    ctx.on = MagicMock(side_effect=_on)
-    ctx._callbacks = _callbacks
-    return ctx
-
-
 def _make_page(url="https://jobs.ashbyhq.com/acme/123/application"):
     page = AsyncMock()
     page.url = url
     page.goto = AsyncMock()
     page.wait_for_timeout = AsyncMock()
-    page.context = _make_context()
     _callbacks = {}
 
     def _on(event, cb):
@@ -41,9 +27,28 @@ def _make_page(url="https://jobs.ashbyhq.com/acme/123/application"):
     return page
 
 
-def _make_browser(page):
+def _make_context(page):
+    """Return a mock BrowserContext that owns *page* and records callbacks."""
+    ctx = MagicMock()
+    ctx.new_page = AsyncMock(return_value=page)
+    ctx.storage_state = AsyncMock()
+    ctx.pages = [page]
+    _callbacks = {}
+
+    def _on(event, cb):
+        _callbacks.setdefault(event, []).append(cb)
+
+    ctx.on = MagicMock(side_effect=_on)
+    ctx._callbacks = _callbacks
+    # Give page a back-reference so try_click_apply can reach the context.
+    page.context = ctx
+    return ctx
+
+
+def _make_browser(ctx):
+    """Return a mock Browser that returns *ctx* from new_context()."""
     browser = AsyncMock()
-    browser.new_page = AsyncMock(return_value=page)
+    browser.new_context = AsyncMock(return_value=ctx)
     browser.close = AsyncMock()
     _callbacks = {}
 
@@ -126,7 +131,8 @@ def test_system_browser_domain_returns_manual():
 def test_page_load_failure():
     page = _make_page()
     page.goto.side_effect = Exception("timeout")
-    browser = _make_browser(page)
+    ctx = _make_context(page)
+    browser = _make_browser(ctx)
     pw_cm = _make_pw_context(browser)
 
     with patch("utils.form_prefill.async_playwright", return_value=pw_cm), \
@@ -135,7 +141,8 @@ def test_page_load_failure():
          patch("utils.form_prefill.scan_fields", new_callable=AsyncMock, return_value=[]), \
          patch("utils.form_prefill.fill_form", new_callable=AsyncMock, return_value=[]), \
          patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
-         patch("utils.form_prefill.detect_ats", return_value="ashby"):
+         patch("utils.form_prefill.detect_ats", return_value="ashby"), \
+         patch("utils.site_login.try_site_login", new_callable=AsyncMock, return_value=False):
 
         result = asyncio.run(run_prefill_session(JOB, PROFILE))
 
@@ -181,7 +188,8 @@ def _run_with_close(job, profile, page, browser, pw_cm, *, extra_patches=None):
 
 def test_successful_fill_returns_ok():
     page = _make_page()
-    browser = _make_browser(page)
+    ctx = _make_context(page)
+    browser = _make_browser(ctx)
     pw_cm = _make_pw_context(browser)
 
     actions = [
@@ -201,7 +209,8 @@ def test_successful_fill_returns_ok():
              patch("utils.form_prefill.scan_fields", new_callable=AsyncMock, return_value=["f1", "f2"]), \
              patch("utils.form_prefill.fill_form", new_callable=AsyncMock, return_value=actions), \
              patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
-             patch("utils.form_prefill.detect_ats", return_value="ashby"):
+             patch("utils.form_prefill.detect_ats", return_value="ashby"), \
+             patch("utils.site_login.try_site_login", new_callable=AsyncMock, return_value=False):
             return await run_prefill_session(JOB, PROFILE, wait_timeout=5)
 
     result = asyncio.run(_run())
@@ -214,7 +223,8 @@ def test_successful_fill_returns_ok():
 
 def test_manual_only_ats_skips_fill():
     page = _make_page(url="https://jobs.workday.com/acme/123")
-    browser = _make_browser(page)
+    ctx = _make_context(page)
+    browser = _make_browser(ctx)
     pw_cm = _make_pw_context(browser)
     fill_mock = AsyncMock(return_value=[])
     scan_mock = AsyncMock(return_value=["f1"])
@@ -231,7 +241,8 @@ def test_manual_only_ats_skips_fill():
              patch("utils.form_prefill.scan_fields", scan_mock), \
              patch("utils.form_prefill.fill_form", fill_mock), \
              patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
-             patch("utils.form_prefill.detect_ats", return_value="workday"):
+             patch("utils.form_prefill.detect_ats", return_value="workday"), \
+             patch("utils.site_login.try_site_login", new_callable=AsyncMock, return_value=False):
             return await run_prefill_session(JOB, PROFILE, wait_timeout=5)
 
     result = asyncio.run(_run())
@@ -243,7 +254,8 @@ def test_manual_only_ats_skips_fill():
 
 def test_apply_button_clicked_triggers_timeout_wait():
     page = _make_page()
-    browser = _make_browser(page)
+    ctx = _make_context(page)
+    browser = _make_browser(ctx)
     pw_cm = _make_pw_context(browser)
 
     async def _run():
@@ -258,7 +270,8 @@ def test_apply_button_clicked_triggers_timeout_wait():
              patch("utils.form_prefill.scan_fields", new_callable=AsyncMock, return_value=[]), \
              patch("utils.form_prefill.fill_form", new_callable=AsyncMock, return_value=[]), \
              patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
-             patch("utils.form_prefill.detect_ats", return_value="ashby"):
+             patch("utils.form_prefill.detect_ats", return_value="ashby"), \
+             patch("utils.site_login.try_site_login", new_callable=AsyncMock, return_value=False):
             return await run_prefill_session(JOB, PROFILE, wait_timeout=5)
 
     result = asyncio.run(_run())
@@ -270,7 +283,8 @@ def test_apply_button_clicked_triggers_timeout_wait():
 
 def test_extract_apply_url_navigates_to_resolved():
     page = _make_page()
-    browser = _make_browser(page)
+    ctx = _make_context(page)
+    browser = _make_browser(ctx)
     pw_cm = _make_pw_context(browser)
     resolved_url = "https://jobs.ashbyhq.com/acme/123/application"
 
@@ -289,7 +303,8 @@ def test_extract_apply_url_navigates_to_resolved():
              patch("utils.form_prefill.scan_fields", new_callable=AsyncMock, return_value=[]), \
              patch("utils.form_prefill.fill_form", new_callable=AsyncMock, return_value=[]), \
              patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
-             patch("utils.form_prefill.detect_ats", side_effect=lambda _: next(_ats_seq)):
+             patch("utils.form_prefill.detect_ats", side_effect=lambda _: next(_ats_seq)), \
+             patch("utils.site_login.try_site_login", new_callable=AsyncMock, return_value=False):
             return await run_prefill_session(JOB, PROFILE, wait_timeout=5)
 
     result = asyncio.run(_run())
@@ -300,7 +315,8 @@ def test_extract_apply_url_navigates_to_resolved():
 
 def test_extract_apply_url_same_as_original_skips_second_goto():
     page = _make_page()
-    browser = _make_browser(page)
+    ctx = _make_context(page)
+    browser = _make_browser(ctx)
     pw_cm = _make_pw_context(browser)
 
     async def _run():
@@ -315,7 +331,8 @@ def test_extract_apply_url_same_as_original_skips_second_goto():
              patch("utils.form_prefill.scan_fields", new_callable=AsyncMock, return_value=[]), \
              patch("utils.form_prefill.fill_form", new_callable=AsyncMock, return_value=[]), \
              patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
-             patch("utils.form_prefill.detect_ats", return_value="ashby"):
+             patch("utils.form_prefill.detect_ats", return_value="ashby"), \
+             patch("utils.site_login.try_site_login", new_callable=AsyncMock, return_value=False):
             return await run_prefill_session(JOB, PROFILE, wait_timeout=5)
 
     result = asyncio.run(_run())
@@ -325,7 +342,8 @@ def test_extract_apply_url_same_as_original_skips_second_goto():
 
 def test_scan_fields_exception_handled():
     page = _make_page()
-    browser = _make_browser(page)
+    ctx = _make_context(page)
+    browser = _make_browser(ctx)
     pw_cm = _make_pw_context(browser)
 
     async def _run():
@@ -340,7 +358,8 @@ def test_scan_fields_exception_handled():
              patch("utils.form_prefill.scan_fields", side_effect=Exception("scan crash")), \
              patch("utils.form_prefill.fill_form", new_callable=AsyncMock, return_value=[]), \
              patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
-             patch("utils.form_prefill.detect_ats", return_value="ashby"):
+             patch("utils.form_prefill.detect_ats", return_value="ashby"), \
+             patch("utils.site_login.try_site_login", new_callable=AsyncMock, return_value=False):
             return await run_prefill_session(JOB, PROFILE, wait_timeout=5)
 
     result = asyncio.run(_run())
@@ -350,7 +369,8 @@ def test_scan_fields_exception_handled():
 
 def test_fill_form_exception_handled():
     page = _make_page()
-    browser = _make_browser(page)
+    ctx = _make_context(page)
+    browser = _make_browser(ctx)
     pw_cm = _make_pw_context(browser)
 
     async def _run():
@@ -365,7 +385,8 @@ def test_fill_form_exception_handled():
              patch("utils.form_prefill.scan_fields", new_callable=AsyncMock, return_value=["f1"]), \
              patch("utils.form_prefill.fill_form", side_effect=Exception("fill crash")), \
              patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
-             patch("utils.form_prefill.detect_ats", return_value="ashby"):
+             patch("utils.form_prefill.detect_ats", return_value="ashby"), \
+             patch("utils.site_login.try_site_login", new_callable=AsyncMock, return_value=False):
             return await run_prefill_session(JOB, PROFILE, wait_timeout=5)
 
     result = asyncio.run(_run())
@@ -375,7 +396,8 @@ def test_fill_form_exception_handled():
 
 def test_resume_upload_exception_handled():
     page = _make_page()
-    browser = _make_browser(page)
+    ctx = _make_context(page)
+    browser = _make_browser(ctx)
     pw_cm = _make_pw_context(browser)
 
     async def _run():
@@ -390,7 +412,8 @@ def test_resume_upload_exception_handled():
              patch("utils.form_prefill.scan_fields", new_callable=AsyncMock, return_value=[]), \
              patch("utils.form_prefill.fill_form", new_callable=AsyncMock, return_value=[]), \
              patch("utils.form_prefill.try_upload_resume", side_effect=Exception("upload crash")), \
-             patch("utils.form_prefill.detect_ats", return_value="ashby"):
+             patch("utils.form_prefill.detect_ats", return_value="ashby"), \
+             patch("utils.site_login.try_site_login", new_callable=AsyncMock, return_value=False):
             return await run_prefill_session(JOB, PROFILE, wait_timeout=5)
 
     result = asyncio.run(_run())
@@ -399,7 +422,8 @@ def test_resume_upload_exception_handled():
 
 def test_no_fields_detected_skips_fill():
     page = _make_page()
-    browser = _make_browser(page)
+    ctx = _make_context(page)
+    browser = _make_browser(ctx)
     pw_cm = _make_pw_context(browser)
     fill_mock = AsyncMock(return_value=[])
 
@@ -415,7 +439,8 @@ def test_no_fields_detected_skips_fill():
              patch("utils.form_prefill.scan_fields", new_callable=AsyncMock, return_value=[]), \
              patch("utils.form_prefill.fill_form", fill_mock), \
              patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
-             patch("utils.form_prefill.detect_ats", return_value="ashby"):
+             patch("utils.form_prefill.detect_ats", return_value="ashby"), \
+             patch("utils.site_login.try_site_login", new_callable=AsyncMock, return_value=False):
             return await run_prefill_session(JOB, PROFILE, wait_timeout=5)
 
     result = asyncio.run(_run())
@@ -472,7 +497,8 @@ def test_new_tab_triggers_fill():
     listing_page = _make_page(url="https://euremotejobs.com/job/some-job/")
     # The new Ashby tab that opens when the user clicks Apply.
     ashby_tab = _make_page(url="https://jobs.ashbyhq.com/acme/123/application")
-    browser = _make_browser(listing_page)
+    ctx = _make_context(listing_page)
+    browser = _make_browser(ctx)
     pw_cm = _make_pw_context(browser)
 
     fill_mock = AsyncMock(return_value=[{"action": "filled"}, {"action": "filled"}])
@@ -488,7 +514,7 @@ def test_new_tab_triggers_fill():
             # Give the session time to register the context.on("page") handler,
             # then fire it with the new Ashby tab.
             await asyncio.sleep(0.05)
-            for cb in listing_page.context._callbacks.get("page", []):
+            for cb in ctx._callbacks.get("page", []):
                 cb(ashby_tab)
             # Close shortly after so the session ends.
             await asyncio.sleep(0.2)
@@ -501,7 +527,8 @@ def test_new_tab_triggers_fill():
              patch("utils.form_prefill.scan_fields", scan_mock), \
              patch("utils.form_prefill.fill_form", fill_mock), \
              patch("utils.form_prefill.try_upload_resume", new_callable=AsyncMock), \
-             patch("utils.form_prefill.detect_ats", side_effect=_detect):
+             patch("utils.form_prefill.detect_ats", side_effect=_detect), \
+             patch("utils.site_login.try_site_login", new_callable=AsyncMock, return_value=False):
             return await run_prefill_session(JOB, PROFILE, wait_timeout=5)
 
     result = asyncio.run(_run())
