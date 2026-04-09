@@ -349,8 +349,9 @@ class TestGreenhouseFetch:
             assert len(jobs) == 1, f"Expected job with location '{loc}' to pass"
 
     def test_empty_slugs_returns_empty_list(self):
+        from connectors.greenhouse import _CURATED_SLUGS
         with patch(self._PATCH_DB_SLUGS, return_value=set()), \
-             patch(self._PATCH_EXCL_SLUGS, return_value=set()):
+             patch(self._PATCH_EXCL_SLUGS, return_value=_CURATED_SLUGS.copy()):
             from connectors.greenhouse import GreenhouseConnector
             jobs = GreenhouseConnector().fetch_jobs()
         assert jobs == []
