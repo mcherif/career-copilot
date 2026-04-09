@@ -4,11 +4,35 @@ before the Apply button leads to an employer ATS.
 
 Called from form_prefill.py when Playwright lands on a known login page.
 Credentials are read from profile.yaml under the `credentials` key.
+
+Session persistence
+-------------------
+Sites that use Google OAuth (e.g. euremote.jobcopilot.com) don't require
+stored credentials — the OAuth flow is completed interactively in the
+Playwright browser window.  After a successful login the browser context's
+cookies and localStorage are saved to disk (SESSIONS_DIR/{domain}.json) so
+that subsequent visits restore the session and skip the login gate entirely.
 """
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any, Dict
+
+# Where per-domain session state JSON files are stored.
+SESSIONS_DIR = Path.home() / ".career-copilot" / "sessions"
+
+
+def session_state_path(domain: str) -> str | None:
+    """Return the path to saved session state for *domain*, or None if missing."""
+    p = SESSIONS_DIR / f"{domain}.json"
+    return str(p) if p.exists() else None
+
+
+async def save_session_state(context, domain: str) -> None:
+    """Persist *context* cookies and localStorage to SESSIONS_DIR/{domain}.json."""
+    SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    await context.storage_state(path=str(SESSIONS_DIR / f"{domain}.json"))
 
 
 async def dismiss_himalayas_modal(page) -> None:
@@ -46,6 +70,11 @@ async def try_site_login(
 
     url_lower = (url or "").lower()
 
+    if "jobcopilot.com" in url_lower and (
+        "/login" in url_lower or "/signup" in url_lower
+    ):
+        return await _jobcopilot_google_login(page, _log)
+
     if "himalayas.app" in url_lower and (
         "/login" in url_lower or "/signup" in url_lower
     ):
@@ -65,6 +94,50 @@ async def try_site_login(
             return False
 
     return False
+
+
+async def _jobcopilot_google_login(page, _log) -> bool:
+    """Handle the euremote.jobcopilot.com Google OAuth login gate.
+
+    Clicks 'Continue with Google', then waits up to 3 minutes for the
+    OAuth popup to complete and the page to navigate away from /login or
+    /signup.  The caller (form_prefill.py) saves the resulting session
+    state to disk so the next run restores the cookies and skips login.
+    """
+    _log("jobcopilot.com login required — clicking 'Continue with Google'…")
+    try:
+        # Try several selector strategies to find the Google button.
+        for selector in [
+            "text=Continue with Google",
+            "button:has-text('Google')",
+            "a:has-text('Google')",
+            "[aria-label*='Google' i]",
+        ]:
+            btn = page.locator(selector).first
+            if await btn.count() > 0 and await btn.is_visible(timeout=1000):
+                await btn.click()
+                _log("Google sign-in window opened — complete the login in the browser…")
+                break
+        else:
+            _log(
+                "Could not find 'Continue with Google' button — "
+                "log in manually in the browser window."
+            )
+    except Exception as exc:
+        _log(f"Could not click Google button ({exc}) — log in manually.")
+
+    # Wait up to 3 minutes for navigation away from the auth pages.
+    try:
+        await page.wait_for_function(
+            "() => !window.location.href.includes('/login')"
+            "   && !window.location.href.includes('/signup')",
+            timeout=180_000,
+        )
+        _log("Logged in to jobcopilot.com — session will be saved for future runs.")
+        return True
+    except Exception:
+        _log("Login not completed within 3 minutes — continuing in manual mode.")
+        return False
 
 
 async def _himalayas_login(page, email: str, password: str) -> None:

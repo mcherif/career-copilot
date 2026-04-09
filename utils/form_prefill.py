@@ -85,11 +85,26 @@ async def run_prefill_session(
             "reason": "Site blocks automated browsers — open in system browser",
         }
 
+    # Determine whether this job needs a persisted browser session.
+    # euremotejobs jobs redirect to euremote.jobcopilot.com for login.
+    _SESSION_DOMAIN = "jobcopilot.com"
+    _needs_session = (
+        job.get("source") == "euremotejobs"
+        or "jobcopilot.com" in url
+    )
+
+    from utils.site_login import session_state_path, save_session_state
+    _saved_state = session_state_path(_SESSION_DOMAIN) if _needs_session else None
+
     try:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=headless)
-            page = await browser.new_page()
-            context = page.context
+            _ctx_kwargs: dict = {}
+            if _saved_state:
+                _ctx_kwargs["storage_state"] = _saved_state
+                _log("Restoring saved jobcopilot.com session…")
+            context = await browser.new_context(**_ctx_kwargs)
+            page = await context.new_page()
 
             result: Dict[str, Any] = {"ats": "unknown", "filled": 0, "skipped": 0, "errors": 0}
             filled_urls: Set[str] = set()   # dedup by URL path, not ATS name
@@ -170,25 +185,26 @@ async def run_prefill_session(
                 pass
 
             # Auto-login for known sites that gate Apply behind authentication.
-            credentials = profile.get("credentials", {})
-            if credentials:
-                from utils.site_login import try_site_login
-                try:
-                    logged_in = await try_site_login(active_page, active_page.url, credentials, _log)
-                    if logged_in:
-                        await _wait_for_spa(active_page)
-                        # After login, try clicking Apply again on the redirected page.
-                        try:
-                            clicked2, active_page = await try_click_apply(active_page)
-                            if clicked2:
-                                _log(f"Clicked Apply post-login → {active_page.url[:80]}")
-                                await _wait_for_spa(active_page)
-                                from utils.site_login import dismiss_himalayas_modal
-                                await dismiss_himalayas_modal(active_page)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+            # Called unconditionally — some handlers (jobcopilot Google OAuth)
+            # are interactive and don't require stored credentials.
+            from utils.site_login import try_site_login
+            try:
+                credentials = profile.get("credentials", {})
+                logged_in = await try_site_login(active_page, active_page.url, credentials, _log)
+                if logged_in:
+                    await _wait_for_spa(active_page)
+                    # After login, try clicking Apply again on the redirected page.
+                    try:
+                        clicked2, active_page = await try_click_apply(active_page)
+                        if clicked2:
+                            _log(f"Clicked Apply post-login → {active_page.url[:80]}")
+                            await _wait_for_spa(active_page)
+                            from utils.site_login import dismiss_himalayas_modal
+                            await dismiss_himalayas_modal(active_page)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
             # Ashby shortcut: if on a listing page, go to /application directly.
             # Uses _ashby_application_url to correctly insert /application into
@@ -275,6 +291,14 @@ async def run_prefill_session(
                 try:
                     await asyncio.wait_for(t, timeout=2)
                 except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
+            # Persist session state so the next jobcopilot visit skips login.
+            if _needs_session:
+                try:
+                    await save_session_state(context, _SESSION_DOMAIN)
+                    _log("jobcopilot.com session saved.")
+                except Exception:
                     pass
 
             try:
