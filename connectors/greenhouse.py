@@ -18,6 +18,13 @@ logger = setup_logger("greenhouse_connector")
 BASE_URL = "https://boards-api.greenhouse.io/v1/boards"
 _SLUG_RE = re.compile(r"greenhouse\.io/(?:boards/)?([^/?#]+)")
 
+# Verified Greenhouse boards worth probing directly.  The connector also
+# discovers slugs organically from the DB (any Greenhouse URL ingested by
+# other sources), so this list only seeds companies not yet in the DB.
+_CURATED_SLUGS: set[str] = {
+    "jetbrains",  # JetBrains — IDEs / developer tools (EU board, standard API)
+}
+
 
 def _extract_slug(url: str) -> str | None:
     m = _SLUG_RE.search(url)
@@ -90,13 +97,17 @@ class GreenhouseConnector(BaseConnector):
 
     def fetch_jobs(self) -> List[Dict[str, Any]]:
         excluded = _load_excluded_slugs()
-        slugs = _load_slugs_from_db() - excluded
+        db_slugs = _load_slugs_from_db() - excluded
+        slugs = db_slugs | (_CURATED_SLUGS - excluded)
 
         if not slugs:
             logger.info("No Greenhouse slugs found — skipping")
             return []
 
-        logger.info(f"Fetching jobs from {self.source_name} for {len(slugs)} companies: {sorted(slugs)}")
+        logger.info(
+            f"Fetching jobs from {self.source_name} for {len(slugs)} companies "
+            f"({len(db_slugs)} from DB, {len(_CURATED_SLUGS - excluded)} curated): {sorted(slugs)}"
+        )
         target_roles = _load_target_roles()
         all_jobs: List[Dict[str, Any]] = []
         seen_ids: Set[str] = set()

@@ -140,6 +140,17 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["noncompete"], lambda p, j: "no"),
     (["restrictive covenant"], lambda p, j: "no"),
     (["non-solicitation"], lambda p, j: "no"),
+    # "…authorized to work in the country in which this role is located" —
+    # must come BEFORE the generic catch-alls below so the multi-keyword
+    # match wins.  Delegates to _auth_for_job_country to avoid hardcoding "yes".
+    (["authorized to work", "country"], lambda p, j: _auth_for_job_country(p, j)),
+    (["authorized to work", "located"], lambda p, j: _auth_for_job_country(p, j)),
+    (["eligible to work", "country"], lambda p, j: _auth_for_job_country(p, j)),
+    (["eligible to work", "located"], lambda p, j: _auth_for_job_country(p, j)),
+    (["legally entitled", "country"], lambda p, j: _auth_for_job_country(p, j)),
+    (["legally entitled", "located"], lambda p, j: _auth_for_job_country(p, j)),
+    (["legally authorized", "country"], lambda p, j: _auth_for_job_country(p, j)),
+    (["legally authorized", "located"], lambda p, j: _auth_for_job_country(p, j)),
     (["legally entitled"], lambda p, j: "yes"),
     (["authorized to work"], lambda p, j: "yes"),
     (["eligible to work"], lambda p, j: "yes"),
@@ -907,16 +918,42 @@ async def try_upload_resume(
     _fc_page = getattr(page, "page", page)  # Frame → its parent Page
     for selector in upload_selectors:
         try:
-            btn = page.locator(selector).first
-            if await btn.count() == 0 or not await btn.is_visible(timeout=300):
-                continue
-            _log(f"Resume upload: clicking '{selector}'")
-            async with _fc_page.expect_file_chooser(timeout=5000) as fc_info:
-                await btn.click()
-            fc = await fc_info.value
-            await fc.set_files(resume_path)
-            _log(f"Resume upload: uploaded via button '{selector}'")
-            return f"uploaded {resume_path}"
+            locator = page.locator(selector)
+            count = await locator.count()
+            for i in range(count):
+                btn = locator.nth(i)
+                if not await btn.is_visible(timeout=300):
+                    continue
+
+                # Skip buttons that sit inside a cover letter section.
+                # Walk up to 8 ancestor levels and look for "cover letter" text
+                # in the node's own text content (not its full subtree, to avoid
+                # false positives where the resume section mentions cover letters).
+                in_cl_section = await btn.evaluate("""el => {
+                    let node = el.parentElement;
+                    for (let d = 0; d < 8; d++) {
+                        if (!node) break;
+                        const own = Array.from(node.childNodes)
+                            .filter(n => n.nodeType === Node.TEXT_NODE)
+                            .map(n => n.textContent).join('') +
+                            (node.getAttribute('aria-label') || '') +
+                            (node.getAttribute('data-label') || '');
+                        if (/cover.?letter|covering.?letter/i.test(own)) return true;
+                        node = node.parentElement;
+                    }
+                    return false;
+                }""")
+                if in_cl_section:
+                    _log(f"Resume upload: skipping '{selector}' #{i} (inside cover letter section)")
+                    continue
+
+                _log(f"Resume upload: clicking '{selector}' #{i}")
+                async with _fc_page.expect_file_chooser(timeout=5000) as fc_info:
+                    await btn.click()
+                fc = await fc_info.value
+                await fc.set_files(resume_path)
+                _log(f"Resume upload: uploaded via button '{selector}' #{i}")
+                return f"uploaded {resume_path}"
         except Exception as e:
             _log(f"Resume upload: '{selector}' failed — {e}")
             continue
@@ -1765,6 +1802,41 @@ async def _select_combobox_option(
 
     await el.press("Escape")
     return None
+
+
+def _auth_for_job_country(profile: dict, job: dict) -> str:
+    """Answer work-authorization questions that reference the job's country.
+
+    Called for labels like "Are you legally authorized to work in the country
+    in which this role is located?".  Extracts the country from the job
+    location and cross-references it against work_authorization in the profile.
+
+    Logic:
+    - Worldwide / global / no specific country → "yes" (no restriction).
+    - Location contains an explicitly authorized country → "yes".
+    - Otherwise → "no" (visa / sponsorship required).
+    """
+    location = (
+        job.get("location") or job.get("raw_location_text") or ""
+    ).lower()
+    wa = profile.get("work_authorization") or {}
+
+    # No country-specific restriction → safe to say yes.
+    if not location or any(
+        w in location for w in ("worldwide", "anywhere", "global", "remote only")
+    ):
+        return "yes"
+
+    # Build the set of countries the candidate is authorized to work in.
+    # Each truthy key in work_authorization (except meta-keys) is a country.
+    _META = {"sponsorship_required"}
+    authorized = {k.lower() for k, v in wa.items() if v and k.lower() not in _META}
+
+    if any(country in location for country in authorized):
+        return "yes"
+
+    # Country found in location but not in authorized list → needs sponsorship.
+    return "no"
 
 
 def _age_range(profile: dict) -> str:

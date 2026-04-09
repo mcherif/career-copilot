@@ -47,6 +47,9 @@ Thumbs.db
 # Design artifacts
 mockups/
 
+# One-off debug / scratch scripts
+check_duplicates.py
+
 # Private Candidate Data
 resumes/
 *.pdf
