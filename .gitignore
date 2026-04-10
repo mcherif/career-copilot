@@ -54,3 +54,4 @@ check_duplicates.py
 resumes/
 *.pdf
 profile.yaml
+demo_restore.json

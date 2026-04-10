@@ -1325,7 +1325,7 @@ def ui_cmd(port: int, no_browser: bool):
         if _s.connect_ex(("127.0.0.1", port)) == 0:
             import psutil
             killed = False
-            for proc in psutil.process_iter(["pid", "connections"]):
+            for proc in psutil.process_iter(["pid"]):
                 try:
                     for conn in proc.connections(kind="inet"):
                         if conn.laddr.port == port:
