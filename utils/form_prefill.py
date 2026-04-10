@@ -313,6 +313,107 @@ async def run_prefill_session(
         return {"status": "failed", "error": str(exc)}
 
 
+async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -> None:
+    """Fill repeating employment history groups using the work_history from the profile.
+
+    Many ATS forms (Greenhouse, Lever) render a single employment group with an
+    "Add another" or "Add employment" button.  fill_form fills the first group
+    (the current/most-recent role) — this function clicks "Add another" for each
+    additional work history entry and fills the revealed fields.
+    """
+    def _log(msg: str) -> None:
+        if log_fn:
+            try:
+                log_fn(msg)
+            except Exception:
+                pass
+
+    work_history = profile.get("work_history") or []
+    # First entry is already filled by fill_form; fill entries 2 onward.
+    extra_entries = work_history[1:]
+    if not extra_entries:
+        return
+
+    # Selectors for the "Add another" button in employment sections.
+    add_btn_selectors = [
+        "button:has-text('Add another')",
+        "button:has-text('Add Another')",
+        "button:has-text('Add employment')",
+        "button:has-text('Add Employment')",
+        "button:has-text('Add position')",
+        "button:has-text('+ Add')",
+        "a:has-text('Add another')",
+        "a:has-text('Add employment')",
+    ]
+
+    # Field label patterns within each employment group.
+    _COMPANY_LABELS = re.compile(r"company|employer|organization", re.I)
+    _TITLE_LABELS   = re.compile(r"title|position|role", re.I)
+    _START_LABELS   = re.compile(r"start", re.I)
+    _END_LABELS     = re.compile(r"end|to\b", re.I)
+
+    for entry in extra_entries:
+        company  = str(entry.get("company") or "").strip()
+        title    = str(entry.get("title") or "").strip()
+        date_from = str(entry.get("from") or "").strip()
+        date_to   = str(entry.get("to") or "").strip()
+
+        # Find and click the "Add another" button.
+        clicked = False
+        for sel in add_btn_selectors:
+            try:
+                btn = page.locator(sel).last
+                if await btn.count() > 0 and await btn.is_visible(timeout=500):
+                    await btn.click()
+                    await page.wait_for_timeout(800)
+                    clicked = True
+                    _log(f"Employment history: clicked 'Add another' for {company}")
+                    break
+            except Exception:
+                continue
+
+        if not clicked:
+            _log("Employment history: 'Add another' button not found — stopping after first entry")
+            break
+
+        # After clicking, new input fields appear at the bottom of the group list.
+        # Target the *last* set of inputs matching each label pattern.
+        async def _fill_last(pattern: re.Pattern, value: str) -> bool:
+            if not value:
+                return False
+            try:
+                # Broad sweep: find all visible text inputs near a label matching the pattern.
+                all_inputs = page.locator("input[type='text'], input:not([type]), input[type='month'], input[type='date']")
+                count = await all_inputs.count()
+                for i in range(count - 1, max(count - 12, -1), -1):
+                    inp = all_inputs.nth(i)
+                    try:
+                        if not await inp.is_visible(timeout=200):
+                            continue
+                        # Check the nearest label / placeholder / aria-label.
+                        placeholder = await inp.get_attribute("placeholder") or ""
+                        aria_label  = await inp.get_attribute("aria-label") or ""
+                        hint = placeholder + " " + aria_label
+                        if pattern.search(hint):
+                            await inp.fill(value)
+                            return True
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            return False
+
+        filled_company = await _fill_last(_COMPANY_LABELS, company)
+        filled_title   = await _fill_last(_TITLE_LABELS, title)
+        filled_start   = await _fill_last(_START_LABELS, date_from)
+        filled_end     = await _fill_last(_END_LABELS, date_to if date_to != "present" else "")
+        _log(
+            f"Employment history: filled {company!r} — "
+            f"company={filled_company} title={filled_title} "
+            f"start={filled_start} end={filled_end}"
+        )
+
+
 async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: Dict[str, Any], log_fn=None) -> None:
     """Scan and fill all form fields on the current page; update result in place."""
     def _log(msg: str) -> None:
@@ -413,6 +514,12 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
             _log(f"Resume upload error: {exc}")
     else:
         _log("Resume already uploaded via form fields — skipping try_upload_resume")
+
+    # Fill repeating employment history groups ("Add another" pattern).
+    try:
+        await _fill_employment_history(fill_target, profile, _log)
+    except Exception as exc:
+        _log(f"Employment history fill error: {exc}")
 
     # Fall back to "Enter manually" only when the PDF file upload didn't succeed.
     if not cl_file_uploaded:

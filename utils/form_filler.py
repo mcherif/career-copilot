@@ -1118,6 +1118,14 @@ def _effective_label(field: dict, context: str) -> str:
     return context or ""
 
 
+# Section headings that indicate a field is inside an employment/work history block.
+# When the context-prepended label contains one of these AND the field label is a
+# bare "name", it should resolve to the company name, not the candidate's name.
+_EMPLOYMENT_SECTION_WORDS: frozenset[str] = frozenset({
+    "employment", "employer", "work history", "work experience",
+    "experience", "previous employer", "job history",
+})
+
 # Work-auth indicators — if any appear in a label, check for a country name.
 _WA_LABEL_INDICATORS: frozenset[str] = frozenset({
     "authorized to work", "eligible to work", "legally entitled",
@@ -1168,6 +1176,14 @@ def _resolve_text_value(label_lower: str, profile: dict, job: dict) -> str:
     (e.g. "city" substring-matching inside "ethnicity").
     Multi-word keywords (e.g. "first name") are still matched as substrings.
     """
+    # Pre-pass: if the label is a bare "name" inside an employment section context
+    # (e.g. Greenhouse "Employment > Name"), return the current company rather than
+    # the candidate's personal name.
+    label_words_set = set(re.findall(r"\w+", label_lower))
+    if label_words_set <= {"name", "company"} or label_lower.strip() in ("name", "company name"):
+        if any(word in label_lower for word in _EMPLOYMENT_SECTION_WORDS):
+            return profile.get("personal", {}).get("current_company", "") or ""
+
     # Pre-pass: if the label is a work-auth question that names a specific country,
     # check authorization for THAT country rather than the job's location.
     # This handles "Are you legally authorized to work in the United States?" → "no"
