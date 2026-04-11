@@ -131,6 +131,7 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
 .overview-row-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);width:80px;flex-shrink:0;}
 .skills-chips{display:flex;flex-wrap:wrap;gap:5px;}
 .skill-chip{padding:3px 9px;border-radius:6px;font-size:12px;font-weight:500;background:var(--accent-light);color:var(--accent);border:1px solid var(--accent-mid);}
+.job-url-link{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--text-secondary);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px;transition:color .15s;}.job-url-link:hover{color:var(--accent);}
 .analysis-section{margin-bottom:20px;}
 .analysis-section:last-child{margin-bottom:0;}
 .analysis-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:10px;}
@@ -610,6 +611,17 @@ function renderCard(i, direction) {
     const word = s.split(' ').slice(0,2).join(' ');
     return `<span class="skill-chip">${esc(word)}</span>`;
   }).join('');
+  function fmtJobUrl(url) {
+    if (!url) return null;
+    try {
+      const u = new URL(url);
+      const host = u.hostname.replace(/^www\./, '');
+      const path = u.pathname.replace(/\/$/, '');
+      const short = path.length > 28 ? path.slice(0, 26) + '…' : path;
+      return { display: host + (short || ''), href: url };
+    } catch { return { display: url.slice(0, 38), href: url }; }
+  }
+  const jobUrl = fmtJobUrl(job.url);
   document.getElementById('overviewRight').innerHTML = `
     <div class="overview-row">
       <span class="overview-row-label" data-tip="How certain the LLM is of its fit score — low means the job description was vague">Confidence</span>
@@ -626,7 +638,15 @@ function renderCard(i, direction) {
     <div class="overview-row">
       <span class="overview-row-label">LLM</span>
       <span style="font-size:13px;color:var(--text-secondary)">${job.recommendation ? badge(job.recommendation) : '<span style="color:var(--text-muted)">—</span>'}</span>
-    </div>`;
+    </div>
+    ${jobUrl ? `
+    <div class="overview-row">
+      <span class="overview-row-label">Link</span>
+      <a href="${esc(jobUrl.href)}" target="_blank" rel="noopener noreferrer" class="job-url-link" title="${esc(jobUrl.href)}">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:.7"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        ${esc(jobUrl.display)}
+      </a>
+    </div>` : ''}`;
 
   // Analysis
   const strengths = (job.strengths || []).map(s => `<li><span class="dot"></span>${esc(s)}</li>`).join('');
