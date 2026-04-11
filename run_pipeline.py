@@ -287,9 +287,13 @@ def _run_analyze(profile: str, model: str, target_status: str, limit: int, dry_r
     session = SessionLocal()
 
     try:
+        from sqlalchemy import or_
         jobs_to_analyze = (
             session.query(Job)
-            .filter(Job.status == target_status, Job.llm_status.is_(None))
+            .filter(
+                Job.status == target_status,
+                or_(Job.llm_status.is_(None), Job.llm_status == "failed"),
+            )
             .order_by(Job.fit_score.desc(), Job.id.asc())
             .limit(limit)
             .all()
@@ -573,6 +577,11 @@ def full_run(source: str, profile: str, model: str, analyze_status: str, analyze
 
     _run_fetch(source, dry_run)
     _run_evaluate(profile, dry_run, all_jobs=False)
+    # Always analyze both buckets so no shortlisted/review job is left without
+    # LLM metrics regardless of which bucket new jobs land in.
+    for _status in ("review", "shortlisted"):
+        if _status != analyze_status:
+            _run_analyze(profile, model, _status, analyze_limit, dry_run)
     _run_analyze(profile, model, analyze_status, analyze_limit, dry_run)
     logger.info("Full pipeline run complete.")
 

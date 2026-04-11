@@ -61,8 +61,12 @@ class TestFullRunSmoke:
             from run_pipeline import cli
             runner.invoke(cli, ["full-run", "--profile", mock_profile, "--dry-run"])
 
-        assert call_order == ["fetch", "evaluate", "analyze"], \
-            f"Expected fetch→evaluate→analyze, got: {call_order}"
+        # full-run now calls _run_analyze twice: once for the non-default bucket,
+        # once for the configured analyze_status bucket (both shortlisted + review).
+        assert call_order[:2] == ["fetch", "evaluate"], \
+            f"Expected fetch→evaluate first, got: {call_order}"
+        assert call_order.count("analyze") == 2, \
+            f"Expected 2 analyze calls (both buckets), got: {call_order}"
 
     def test_dry_run_flag_passed_to_fetch(self, runner, mock_profile):
         mock_session = _mock_session()
