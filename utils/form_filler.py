@@ -804,10 +804,84 @@ async def fill_form(
                 uploaded = False
                 upload_err = ""
                 fid = field.get("id") or ""
-                # Strategy 0 (cover letter only): click "Enter manually" to reveal
-                # a textarea, then fill it with the cover letter text.  This is far
-                # more reliable than the file-chooser path (Greenhouse/React state
-                # issues) and avoids DOCX generation entirely.
+                # Strategy 1: click the visible sibling Attach button (Greenhouse +
+                # most ATSes).  expect_file_chooser() safely intercepts the browser
+                # file-chooser dialog before it opens, so no OS dialog is shown.
+                # expect_file_chooser() is a Page method; when fill_target is a
+                # cross-origin Frame (e.g. Greenhouse embed on instacart.careers),
+                # we must use the parent Page to intercept the file chooser.
+                _fc_page = getattr(page, "page", page)
+                if fid and not uploaded:
+                    try:
+                        # Use Locator (not ElementHandle) so React re-renders
+                        # between resume and cover-letter uploads don't cause staleness.
+                        btn_loc = page.locator(f'[id="{fid}"]').locator(
+                            "xpath=../button").first
+                        if await btn_loc.count() > 0 and await btn_loc.is_visible():
+                            async with _fc_page.expect_file_chooser(timeout=5000) as fc_info:
+                                await btn_loc.click()
+                            fc = await fc_info.value
+                            await fc.set_files(file_path)
+                            uploaded = True
+                            if is_cover_letter_field:
+                                _log("Cover letter: uploaded PDF via Attach button (Strategy 1)")
+                    except Exception:
+                        pass
+                # Strategy 2: click a visible <label for="id"> (some ATSes).
+                if fid and not uploaded:
+                    try:
+                        lbl = page.locator(f'label[for="{fid}"]:visible').first
+                        if await lbl.count() > 0:
+                            async with _fc_page.expect_file_chooser(timeout=5000) as fc_info:
+                                await lbl.click()
+                            fc = await fc_info.value
+                            await fc.set_files(file_path)
+                            uploaded = True
+                            if is_cover_letter_field:
+                                _log("Cover letter: uploaded PDF via label click (Strategy 2)")
+                    except Exception:
+                        pass
+                # Strategy 3: direct set_input_files — works for standard visible
+                # inputs and also hidden ones (bypasses visibility via getElementById).
+                # After setting files, dispatch a native change event so React/Vue/
+                # Angular state-managers pick up the new file (some frameworks ignore
+                # the programmatic change without an explicit DOM event).
+                if not uploaded:
+                    try:
+                        if fid:
+                            el_loc = page.locator(f'[id="{fid}"]').first
+                            if await el_loc.count() > 0:
+                                if is_cover_letter_field:
+                                    _log(
+                                        "Cover letter: uploading PDF via set_input_files (Strategy 3)")
+                                await el_loc.set_input_files(file_path)
+                                # Dispatch change + input events so React registers the file.
+                                try:
+                                    await page.evaluate(
+                                        "id => { const el = document.getElementById(id);"
+                                        " if (el) {"
+                                        "  el.dispatchEvent(new Event('input', {bubbles:true}));"
+                                        "  el.dispatchEvent(new Event('change', {bubbles:true}));"
+                                        " } }",
+                                        fid,
+                                    )
+                                except Exception:
+                                    pass
+                                uploaded = True
+                            else:
+                                upload_err = "element not found"
+                        else:
+                            el = await _locate_field(page, field)
+                            if el:
+                                await el.set_input_files(file_path)
+                                uploaded = True
+                            else:
+                                upload_err = "element not found"
+                    except Exception as e:
+                        upload_err = str(e)
+                # Strategy 0 (cover letter fallback only): if all file-upload paths
+                # failed, click "Enter manually" and fill the textarea.  This is the
+                # last resort — file upload is always preferred.
                 if is_cover_letter_field and not uploaded:
                     cl_text = ((job or {}).get("cover_letter") or "").strip()
                     if cl_text:
@@ -854,7 +928,7 @@ async def fill_form(
                                         pass
                             if manual_btn is not None and await manual_btn.is_visible():
                                 _log(
-                                    "Cover letter: clicking 'Enter manually' button (Strategy 0)")
+                                    "Cover letter: file upload failed — falling back to 'Enter manually'")
                                 await manual_btn.click()
                                 # Wait specifically for the cover-letter textarea to appear.
                                 # Do NOT use "textarea.last" here — other visible textareas
@@ -890,71 +964,9 @@ async def fill_form(
                                         continue
                             else:
                                 _log(
-                                    "Cover letter: 'Enter manually' button not found (Strategy 0 skipped)")
+                                    "Cover letter: no upload path and no 'Enter manually' button found")
                         except Exception:
                             pass
-                # Strategy 1: click the visible sibling button (Greenhouse pattern).
-                # Greenhouse wraps <button>Attach</button> + <label visually-hidden> +
-                # <input visually-hidden> in a div. The button is the real click target
-                # and triggers React's file-chooser handler correctly.
-                # expect_file_chooser() is a Page method; when fill_target is a
-                # cross-origin Frame (e.g. Greenhouse embed on instacart.careers),
-                # we must use the parent Page to intercept the file chooser.
-                # IMPORTANT: skip Strategies 1 and 2 for cover-letter fields — clicking
-                # the Attach button can leave the OS file dialog open if interception
-                # fails.  Strategy 3 (set_input_files directly on the hidden input) is
-                # safe and sufficient for cover letters.
-                _fc_page = getattr(page, "page", page)
-                if fid and not uploaded and not is_cover_letter_field:
-                    try:
-                        # Use Locator (not ElementHandle) so React re-renders
-                        # between resume and cover-letter uploads don't cause staleness.
-                        btn_loc = page.locator(f'[id="{fid}"]').locator(
-                            "xpath=../button").first
-                        if await btn_loc.count() > 0 and await btn_loc.is_visible():
-                            async with _fc_page.expect_file_chooser(timeout=5000) as fc_info:
-                                await btn_loc.click()
-                            fc = await fc_info.value
-                            await fc.set_files(file_path)
-                            uploaded = True
-                    except Exception:
-                        pass
-                # Strategy 2: click a visible <label for="id"> (some ATSes).
-                if fid and not uploaded and not is_cover_letter_field:
-                    try:
-                        lbl = page.locator(f'label[for="{fid}"]:visible').first
-                        if await lbl.count() > 0:
-                            async with _fc_page.expect_file_chooser(timeout=5000) as fc_info:
-                                await lbl.click()
-                            fc = await fc_info.value
-                            await fc.set_files(file_path)
-                            uploaded = True
-                    except Exception:
-                        pass
-                # Strategy 3: direct set_input_files — works for standard visible
-                # inputs and also hidden ones (bypasses visibility via getElementById).
-                # Always safe for cover letters (no OS dialog, no button click needed).
-                if not uploaded:
-                    try:
-                        if fid:
-                            el_loc = page.locator(f'[id="{fid}"]').first
-                            if await el_loc.count() > 0:
-                                if is_cover_letter_field:
-                                    _log(
-                                        "Cover letter: uploading PDF via set_input_files (Strategy 3)")
-                                await el_loc.set_input_files(file_path)
-                                uploaded = True
-                            else:
-                                upload_err = "element not found"
-                        else:
-                            el = await _locate_field(page, field)
-                            if el:
-                                await el.set_input_files(file_path)
-                                uploaded = True
-                            else:
-                                upload_err = "element not found"
-                    except Exception as e:
-                        upload_err = str(e)
                 if uploaded:
                     _uploaded_paths.add(file_path)
                     # Brief pause so React can finish re-rendering after the
