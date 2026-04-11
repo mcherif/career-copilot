@@ -411,6 +411,10 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
               Copy
             </button>
+            <button class="btn-secondary" id="btnDownloadPdf" onclick="downloadCoverPdf()" title="Download cover letter as PDF">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              PDF
+            </button>
           </div>
         </div>
       </div>
@@ -755,6 +759,24 @@ function copyCover() {
   const text = document.getElementById('coverText').value;
   if (!text) return;
   navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard', 'success'));
+}
+
+function downloadCoverPdf() {
+  const job = jobs[idx];
+  if (!job) return;
+  if (!document.getElementById('coverText').value.trim()) {
+    showToast('Generate a cover letter first', 'error');
+    return;
+  }
+  const btn = document.getElementById('btnDownloadPdf');
+  btn.disabled = true;
+  const a = document.createElement('a');
+  a.href = `/api/jobs/${job.id}/cover-letter/pdf`;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => { btn.disabled = false; }, 1500);
 }
 
 // ── Prefill status polling ──────────────────────────────────────────────────

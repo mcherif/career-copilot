@@ -416,6 +416,63 @@ async def generate_cover(job_id: int):
         session.close()
 
 
+@app.get("/api/jobs/{job_id}/cover-letter/pdf")
+async def download_cover_pdf(job_id: int):
+    """Return the cover letter for job_id as a downloadable PDF."""
+    import io
+    import re as _re
+    from fastapi.responses import StreamingResponse
+
+    session = _Session()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            raise HTTPException(404, f"Job {job_id} not found")
+        text = (job.cover_letter or "").strip()
+        if not text:
+            raise HTTPException(404, "No cover letter for this job")
+
+        company = (job.company or "company").strip()
+        title = (job.title or "position").strip()
+
+        try:
+            from fpdf import FPDF
+        except ImportError as exc:
+            raise HTTPException(500, f"fpdf2 not installed: {exc}") from exc
+
+        pdf = FPDF()
+        pdf.set_margins(25, 25, 25)
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 13)
+        header = f"{title} — {company}"
+        safe_header = header.encode("latin-1", errors="replace").decode("latin-1")
+        pdf.cell(0, 8, safe_header, ln=True)
+        pdf.ln(4)
+        pdf.set_font("Helvetica", size=11)
+        for para in text.split("\n\n"):
+            para = para.strip()
+            if not para:
+                continue
+            safe = para.encode("latin-1", errors="replace").decode("latin-1")
+            pdf.multi_cell(0, 6, safe)
+            pdf.ln(3)
+
+        buf = io.BytesIO(pdf.output())
+        slug = _re.sub(r"[^\w-]", "_", company.lower())[:40]
+        filename = f"cover_letter_{slug}.pdf"
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+    finally:
+        session.close()
+
+
 # ---------------------------------------------------------------------------
 # Prefill state
 # ---------------------------------------------------------------------------
