@@ -2,6 +2,9 @@ career_copilot_plan.json
 career_copilot_project_plan.pdf
 day1_implementation_spec.md
 
+# Generated cover letter PDFs (local review copies)
+cover-letters/
+
 # Secrets
 .env
 

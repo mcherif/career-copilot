@@ -1823,6 +1823,17 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
         pdf_bytes = pdf.output()
         with open(path, "wb") as fh:
             fh.write(pdf_bytes)
+        # Also save a readable copy under <project>/cover-letters/.
+        try:
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            cl_dir = os.path.join(project_root, "cover-letters")
+            os.makedirs(cl_dir, exist_ok=True)
+            copy_path = os.path.join(cl_dir, fname)
+            with open(copy_path, "wb") as fh:
+                fh.write(pdf_bytes)
+            print(f"[cover_letter] saved copy → {copy_path}", flush=True)
+        except Exception as _copy_exc:
+            print(f"[cover_letter] could not save copy: {_copy_exc}", flush=True)
         return path
     except Exception as _exc:
         print(f"[cover_letter] PDF generation error: {_exc}", flush=True)
