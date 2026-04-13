@@ -58,8 +58,9 @@ def build_cover_letter_prompt(job: Dict[str, Any], profile: Dict[str, Any]) -> s
 
     lines += [
         "",
-        "Write a cover letter (plain text, 3 short paragraphs, no markdown, no salutation line). "
-        "Do not start with 'Dear' or a greeting — start directly with the opening paragraph.",
+        "Write the body of a cover letter (plain text, 3 short paragraphs, no markdown). "
+        "Do not include a salutation, greeting, or closing signature — those will be added automatically. "
+        "Start directly with the opening paragraph.",
     ]
 
     return "\n".join(lines)
@@ -97,6 +98,9 @@ def generate_cover_letter(
         content = str(data.get("message", {}).get("content") or "").strip()
         if not content:
             raise ValueError("Ollama returned empty content")
-        return {"cover_letter": content, "status": "ok"}
+        name = str((profile.get("personal") or {}).get("name") or "").strip()
+        signature = f"Best,\n{name}" if name else "Best,"
+        cover_letter = f"Dear Hiring Team,\n\n{content}\n\n{signature}"
+        return {"cover_letter": cover_letter, "status": "ok"}
     except Exception as exc:
         return {"cover_letter": None, "status": "failed", "error": str(exc)}

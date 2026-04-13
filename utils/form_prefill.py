@@ -233,6 +233,25 @@ async def run_prefill_session(
                     pass
                 ats = detect_ats(active_page.url)
 
+            # Personio shortcut: job listing page at jobs.personio.com/job/{id}
+            # has an "Apply for this job" button that reveals the inline form.
+            # Unlike Ashby/Workable there is no separate /apply URL — clicking
+            # the button expands the form on the same page.
+            if ats == "personio":
+                try:
+                    btn = active_page.locator(
+                        "button:has-text('Apply for this job'), "
+                        "a:has-text('Apply for this job'), "
+                        "button:has-text('Apply for this position'), "
+                        "a:has-text('Apply for this position')"
+                    ).first
+                    if await btn.count() > 0 and await btn.is_visible(timeout=2000):
+                        _log("Personio: clicking 'Apply for this job'…")
+                        await btn.click()
+                        await _wait_for_spa(active_page)
+                except Exception:
+                    pass
+
             # Fill whichever page we ended up on if it's an ATS form.
             # Also fill when the page URL is "unknown" but a child frame belongs
             # to a known ATS (e.g. Greenhouse embedded on employer career sites).
@@ -243,11 +262,14 @@ async def run_prefill_session(
                 elif ats != "unknown" or frame_ats not in (None, "unknown"):
                     if ats == "unknown":
                         ats = frame_ats or "unknown"
-                    _log(f"ATS detected: {ats} — filling form…")
                     result["ats"] = ats
                     key = _page_key(active_page.url)
-                    await _do_fill(active_page, profile, job, result, log_fn=_log)
-                    filled_urls.add(key)
+                    if key in filled_urls:
+                        _log(f"ATS detected: {ats} — already filled by tab handler, skipping.")
+                    else:
+                        _log(f"ATS detected: {ats} — filling form…")
+                        filled_urls.add(key)
+                        await _do_fill(active_page, profile, job, result, log_fn=_log)
                 else:
                     _log("No application form detected — browser is open, navigate to the form manually.")
 
@@ -311,6 +333,85 @@ async def run_prefill_session(
 
     except Exception as exc:
         return {"status": "failed", "error": str(exc)}
+
+
+_ITI_COUNTRY_MAP: dict[str, str] = {
+    "tunisia": "tn",
+    "canada": "ca",
+    "united states": "us",
+    "united kingdom": "gb",
+    "uk": "gb",
+    "germany": "de",
+    "france": "fr",
+    "australia": "au",
+    "india": "in",
+    "brazil": "br",
+    "netherlands": "nl",
+    "spain": "es",
+    "italy": "it",
+    "poland": "pl",
+    "portugal": "pt",
+    "sweden": "se",
+    "norway": "no",
+    "denmark": "dk",
+    "finland": "fi",
+    "switzerland": "ch",
+    "austria": "at",
+    "belgium": "be",
+}
+
+
+async def _set_iti_phone_country(page, profile: Dict[str, Any], log_fn=None) -> None:
+    """Set the intl-tel-input phone country on any phone fields.
+
+    Greenhouse job-boards and similar ATSes use intl-tel-input (iti) which renders
+    a flag button for country selection rather than a standard <select>/<input>.
+    Tries the iti JS API first; falls back to clicking the flag button and
+    selecting from the visible country dropdown.
+    """
+    phone_country = str((profile.get("personal") or {}).get("phone_country") or "").strip().lower()
+    iso2 = _ITI_COUNTRY_MAP.get(phone_country, "")
+    if not iso2:
+        return
+    try:
+        # Strategy 1: JS API (works when intlTelInputGlobals is present).
+        count = await page.evaluate("""(iso2) => {
+            if (!window.intlTelInputGlobals) return 0;
+            const inputs = document.querySelectorAll('input[type="tel"]');
+            let set = 0;
+            for (const inp of inputs) {
+                const iti = intlTelInputGlobals.getInstance(inp);
+                if (iti) { iti.setCountry(iso2); set++; }
+            }
+            return set;
+        }""", iso2)
+        if count:
+            if log_fn:
+                log_fn(f"Phone country set to {iso2.upper()} via iti API.")
+            return
+
+        # Strategy 2: click the flag button, then click the matching country item.
+        flag_btn = page.locator(
+            ".iti__selected-flag, .iti__flag-container button, "
+            "button[class*='iti__selected'], div[class*='iti__selected-flag']"
+        ).first
+        if await flag_btn.count() == 0 or not await flag_btn.is_visible(timeout=1000):
+            return
+        await flag_btn.click()
+        await asyncio.sleep(0.4)
+        # Country items have data-country-code or data-dial-code attribute.
+        country_item = page.locator(
+            f"[data-country-code='{iso2}'], li.iti__country[data-country-code='{iso2}']"
+        ).first
+        if await country_item.count() > 0 and await country_item.is_visible(timeout=1000):
+            await country_item.scroll_into_view_if_needed()
+            await country_item.click()
+            if log_fn:
+                log_fn(f"Phone country set to {iso2.upper()} via dropdown click.")
+        else:
+            await page.keyboard.press("Escape")
+    except Exception:
+        pass
 
 
 async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -> None:
@@ -503,6 +604,13 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
                     )
         except Exception:
             pass
+
+    # Set intl-tel-input phone country code (Greenhouse job-boards and similar ATSes
+    # use the iti library which renders a flag button, not a standard input/select).
+    try:
+        await _set_iti_phone_country(fill_target, profile, log_fn=_log)
+    except Exception:
+        pass
 
     # Only call try_upload_resume if the resume was NOT already uploaded via
     # fill_form (prevents double-upload on standard forms with visible file inputs).

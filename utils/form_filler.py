@@ -117,7 +117,14 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["years experience"], lambda p, j: _years_label(p)),
     (["how many years"], lambda p, j: _years_label(p)),
     (["years"], lambda p, j: _years_label(p)),
-    (["start date"], lambda p, j: _years_label(p)),
+    # Start / availability fields
+    (["available from"], lambda p, j: p.get("preferences", {}).get("available_from", "Immediately")),
+    (["available date"], lambda p, j: p.get("preferences", {}).get("available_from", "Immediately")),
+    (["start date"], lambda p, j: p.get("preferences", {}).get("available_from", "Immediately")),
+    (["earliest start"], lambda p, j: p.get("preferences", {}).get("available_from", "Immediately")),
+    (["when can you start"], lambda p, j: p.get("preferences", {}).get("available_from", "Immediately")),
+    (["when are you available"], lambda p, j: p.get("preferences", {}).get("available_from", "Immediately")),
+    (["notice period"], lambda p, j: p.get("preferences", {}).get("notice_period", "None")),
     (["referral", "hear"], lambda p, j: p.get("preferences", {}).get(
         "referral_source", "internet search")),
     (["how did you find"], lambda p, j: p.get("preferences", {}).get(
@@ -1788,8 +1795,8 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
     if not text:
         return ""
 
-    company_slug = re.sub(
-        r"[^\w-]", "_", ((job or {}).get("company") or "company"))
+    company_slug = re.sub(r"[^\w-]", "_", ((job or {}).get("company") or "company"))
+    title_slug = re.sub(r"[^\w-]", "_", ((job or {}).get("title") or "position"))[:40]
 
     # Prefer PDF (accepted by all major ATSes and has no macro-safety warnings).
     # Write via BytesIO to avoid Windows file-locking issues when the same
@@ -1807,7 +1814,8 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
             })
             return s.translate(_MAP).encode("latin-1", errors="replace").decode("latin-1")
 
-        fname = f"cover_letter_{company_slug}.pdf"
+        # ATS upload: no timestamp (cleaner filename shown to recruiters).
+        fname = f"cover_letter_{company_slug}__{title_slug}.pdf"
         path = os.path.join(tempfile.gettempdir(), fname)
         pdf = FPDF()
         pdf.set_margins(25, 25, 25)
@@ -1823,12 +1831,16 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
         pdf_bytes = pdf.output()
         with open(path, "wb") as fh:
             fh.write(pdf_bytes)
-        # Also save a readable copy under <project>/cover-letters/.
+        # Local copy: include date so multiple applications to the same company
+        # are distinguishable.
         try:
+            from datetime import date as _date
+            today = _date.today().strftime("%Y-%m-%d")
             project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             cl_dir = os.path.join(project_root, "cover-letters")
             os.makedirs(cl_dir, exist_ok=True)
-            copy_path = os.path.join(cl_dir, fname)
+            copy_fname = f"cover_letter_{company_slug}__{title_slug}__{today}.pdf"
+            copy_path = os.path.join(cl_dir, copy_fname)
             with open(copy_path, "wb") as fh:
                 fh.write(pdf_bytes)
             print(f"[cover_letter] saved copy → {copy_path}", flush=True)

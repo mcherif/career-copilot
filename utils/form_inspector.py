@@ -168,6 +168,11 @@ async def scan_fields(page: Page) -> list[dict]:
                 // fill_form uses check(force=True) which bypasses opacity.
                 const t = el.type || '';
                 if (t === 'radio' || t === 'checkbox') return true;
+                // react-select hides its <input role="combobox"> with opacity:0
+                // so the styled control overlaps it.  Allow it through —
+                // fill_form calls _select_combobox_option which clicks the
+                // visible container and picks from the dropdown.
+                if ((el.getAttribute('role') || '') === 'combobox') return true;
                 return s.opacity !== '0';
             }
 

@@ -124,18 +124,21 @@ class TestGenerateCoverLetter:
 
     def test_returns_cover_letter_on_success(self):
         from utils.cover_letter import generate_cover_letter
-        letter = "I am writing to express my interest in..."
-        with patch(self._T, return_value=self._mock_resp(letter)):
+        body = "I am writing to express my interest in..."
+        with patch(self._T, return_value=self._mock_resp(body)):
             result = generate_cover_letter(_job(), _profile())
         assert result["status"] == "ok"
-        assert result["cover_letter"] == letter
+        assert result["cover_letter"].startswith("Dear Hiring Team,")
+        assert body in result["cover_letter"]
+        assert result["cover_letter"].endswith("Best,\nJane Doe")
 
     def test_strips_whitespace_from_response(self):
         from utils.cover_letter import generate_cover_letter
-        letter = "  \nI bring strong backend skills.\n  "
-        with patch(self._T, return_value=self._mock_resp(letter)):
+        body = "  \nI bring strong backend skills.\n  "
+        with patch(self._T, return_value=self._mock_resp(body)):
             result = generate_cover_letter(_job(), _profile())
-        assert result["cover_letter"] == letter.strip()
+        assert body.strip() in result["cover_letter"]
+        assert result["cover_letter"].startswith("Dear Hiring Team,")
 
     def test_returns_failed_on_http_error(self):
         from utils.cover_letter import generate_cover_letter

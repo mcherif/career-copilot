@@ -131,6 +131,13 @@ def _candidate_summary(profile: Dict[str, Any]) -> str:
     if preferred_levels:
         summary_lines.append(f"- Seniority: {', '.join(map(str, preferred_levels[:4]))}")
 
+    # Free-form Q&A context — facts to cite when answering application questions.
+    notes = profile.get("notes", [])
+    if notes:
+        summary_lines.append("- Additional context (cite these facts when answering application questions):")
+        for note in notes:
+            summary_lines.append(f"  • {str(note).strip()}")
+
     return "\n".join(summary_lines)
 
 def build_analysis_prompt(job: Dict[str, Any], profile: Dict[str, Any]) -> str:

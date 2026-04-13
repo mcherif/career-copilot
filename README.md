@@ -61,9 +61,14 @@ Each job passes through ingestion, deterministic scoring, LLM semantic evaluatio
 - Web UI for job triage, cover letter generation, and pipeline control
 - Natural language assistant with live database access and tool calling
 - Resume recommendation engine — best resume selected per job from tagged profiles
-- ATS detection and Playwright-powered form prefill (Greenhouse, Lever, Ashby, Workable)
+- ATS detection and Playwright-powered form prefill (Greenhouse, Lever, Ashby, Workable, Personio, Comeet, Recruitee, SmartRecruiters)
 - LLM-generated answers for freeform application questions (cover letters, motivation fields)
+- Cover letter uploaded as a PDF file when the ATS has a file upload field; a dated copy is saved to `cover-letters/` for local review
+- Phone country code auto-set via intl-tel-input API or dropdown click (e.g. Tunisia +216)
+- react-select EEO dropdowns (gender, race, disability) detected and filled automatically
+- Remote eligibility filter rejects APAC-only, LATAM-only, and Southeast Asia-only postings
 - Smart phone/age/current-company field fill and Gmail IMAP security-code interception
+- "Available from" / "start date" / "notice period" fields auto-filled from profile preferences
 - Scheduled automation via Windows Task Scheduler
 - Email digest reports after each pipeline run
 
@@ -107,9 +112,9 @@ A browser-based triage interface for reviewing and acting on jobs without using 
 **What it does:**
 
 - **Status strip** — live counts across all pipeline stages (New, Review, Shortlisted, Applied, Deferred, Rejected, Expired). Click any pill to jump to that queue.
-- **Job card** — one job at a time. Tabs for Overview (score, highlights, LLM confidence), Analysis (strengths, gaps, reasoning), Cover Letter (generate via Ollama), and full Description.
+- **Job card** — one job at a time. Tabs for Overview (score, highlights, LLM confidence), Analysis (strengths, gaps, reasoning), Cover Letter (generate via Ollama, copy to clipboard, or download as PDF), and full Description.
 - **Triage buttons** — Reject / Defer / Shortlist with a single click. The card advances automatically to the next job.
-- **Open & Apply** — opens the job URL in your browser.
+- **Open & Apply** — opens the job in a Playwright browser with ATS prefill. After confirming you applied, the card advances to the next shortlisted job.
 - **Pipeline panel** — trigger a full pipeline run from the UI and watch fetch → evaluate → analyze progress in real time.
 
 Launch it:
@@ -354,12 +359,17 @@ The default schedule runs at 8am, 12pm, 4pm, and 8pm daily.
 1. Navigates to the application form (follows listing-page → employer apply URL for aggregator sources)
 2. Detects the ATS (Greenhouse, Lever, Ashby, etc.)
 3. Prefills fields from your profile (name, email, phone, LinkedIn, GitHub, current company, location)
-4. Fills age-group dropdowns, smart-phone-format fields, and EEO/demographic fields automatically
-5. Uses the local LLM to generate answers for freeform questions (motivation, cover letter prompts, custom questions)
-6. Intercepts Gmail IMAP to auto-fill security codes when the ATS sends a verification email
-7. Attempts to upload the best-matched resume
-8. Waits for your review — **you submit manually**
-9. Prompts you to mark the job as `applied`
+4. Fills age-group dropdowns, smart-phone-format fields, EEO/demographic fields (gender, race, disability), and react-select comboboxes automatically
+5. Sets the phone country code via the intl-tel-input flag button (e.g. Tunisia +216) on ATS forms that use it (Greenhouse job-boards, Comeet)
+6. Fills "available from", "start date", and "notice period" fields from your profile preferences
+7. Uses the local LLM to generate answers for freeform questions (motivation, cover letter prompts, custom questions)
+8. Uploads the cover letter as a PDF when the ATS has a file upload field; a copy is saved to `cover-letters/cover_letter_<company>__<title>__<date>.pdf` for local review before submitting
+9. Intercepts Gmail IMAP to auto-fill security codes when the ATS sends a verification email
+10. Attempts to upload the best-matched resume
+11. Waits for your review — **you submit manually**
+12. Prompts you to mark the job as `applied`; the UI advances automatically to the next shortlisted job
+
+Supported ATS platforms: Greenhouse, Lever, Ashby, Workable, Personio, Comeet, Recruitee, SmartRecruiters. Comeet is detected by URL path pattern (`/o/{slug}/c/`) so custom employer domains (e.g. `careers.tether.io`) are handled automatically.
 
 Bot-protected sites (remoteok.com, weworkremotely.com, jobicy.com) open in your system browser without prefill.
 

@@ -31,6 +31,24 @@ DEFAULT_REJECT_KEYWORDS = [
     "us residents only",
     "based in the united states",
     "located in the united states",
+    # APAC / Asia-only remote restrictions
+    "remote apac",
+    "remote - apac",
+    "apac only",
+    "apac region",
+    "remote southeast asia",
+    "remote - southeast asia",
+    "southeast asia only",
+    "asia pacific only",
+    "asia-pacific only",
+    "remote asia",
+    "remote - asia",
+    "asia only",
+    "east asia only",
+    "remote latam",
+    "remote - latam",
+    "latam only",
+    "latin america only",
 ]
 
 REVIEW_KEYWORDS = [
@@ -53,6 +71,8 @@ _BROAD_REGION_OVERRIDES = ("worldwide", "global", "emea", "europe", "anywhere", 
 MIXED_REGION_HINTS = [
     "americas",
     "asia",
+    "apac",
+    "southeast asia",
     "oceania",
     "australia",
     "africa",
