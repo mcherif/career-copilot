@@ -1792,6 +1792,8 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
         r"[^\w-]", "_", ((job or {}).get("company") or "company"))
 
     # Prefer PDF (accepted by all major ATSes and has no macro-safety warnings).
+    # Write via BytesIO to avoid Windows file-locking issues when the same
+    # temp path was previously opened by Playwright's set_input_files.
     try:
         from fpdf import FPDF
 
@@ -1809,10 +1811,13 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
             safe = para.encode("latin-1", errors="replace").decode("latin-1")
             pdf.multi_cell(0, 6, safe)
             pdf.ln(3)
-        pdf.output(path)
+        # Write bytes → file (avoids re-opening a file already read by Playwright).
+        pdf_bytes = pdf.output()
+        with open(path, "wb") as fh:
+            fh.write(pdf_bytes)
         return path
-    except Exception:
-        pass
+    except Exception as _exc:
+        print(f"[cover_letter] PDF generation error: {_exc}", flush=True)
 
     # Fallback: DOCX (python-docx already in requirements).
     try:
@@ -1827,7 +1832,8 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
                 doc.add_paragraph(para)
         doc.save(path)
         return path
-    except Exception:
+    except Exception as _exc:
+        print(f"[cover_letter] DOCX generation error: {_exc}", flush=True)
         return ""
 
 

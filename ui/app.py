@@ -446,7 +446,8 @@ async def download_cover_pdf(job_id: int):
         pdf.set_font("Helvetica", "B", 13)
         header = f"{title} — {company}"
         safe_header = header.encode("latin-1", errors="replace").decode("latin-1")
-        pdf.cell(0, 8, safe_header, ln=True)
+        from fpdf.enums import XPos, YPos
+        pdf.cell(0, 8, safe_header, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(4)
         pdf.set_font("Helvetica", size=11)
         for para in text.split("\n\n"):
@@ -468,6 +469,8 @@ async def download_cover_pdf(job_id: int):
     except HTTPException:
         raise
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(500, str(exc))
     finally:
         session.close()
