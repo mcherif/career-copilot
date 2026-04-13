@@ -528,6 +528,15 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
         except Exception:
             pass
 
+    # Final verification: scan the DOM directly for any cover letter file inputs
+    # that are still empty and retry the upload.  This catches cases where the
+    # field was detected but skipped (no cover letter text at fill time), or where
+    # the earlier upload silently failed.
+    try:
+        await _ensure_cover_letter_uploaded(fill_target, job, _log)
+    except Exception as exc:
+        _log(f"Cover letter check error: {exc}")
+
     # All automated filling is now complete.  The browser stays open so the user
     # can review, fix anything, and click Submit — but no more automation will run.
     total_filled = result.get("filled", 0)
@@ -756,6 +765,109 @@ async def _wait_for_spa(page) -> None:
     except Exception:
         pass
     await page.wait_for_timeout(500)
+
+
+async def _ensure_cover_letter_uploaded(page, job: Dict[str, Any], log_fn=None) -> None:
+    """DOM-level verification that a cover letter was uploaded.
+
+    After fill_form() + _fill_cover_letter_manually() have run, scan every
+    input[type='file'] in the DOM whose surrounding context mentions
+    "cover letter".  If any such input still has no file (files.length == 0)
+    we attempt a direct set_input_files upload.
+
+    Logs clearly:
+      - "Cover letter field filled ✓"                  — already done
+      - "Cover letter uploaded ✓"                      — retry succeeded
+      - "⚠ Cover letter field found but empty …"       — no text / retry failed
+
+    Does nothing when no cover-letter file field is found on the page
+    (the form simply has no cover letter field).
+    """
+    def _log(msg: str) -> None:
+        if log_fn:
+            try:
+                log_fn(msg)
+            except Exception:
+                pass
+
+    # Scan the DOM for file inputs associated with a "cover letter" label / context.
+    cl_inputs: list[dict] = []
+    try:
+        cl_inputs = await page.evaluate("""() => {
+            return Array.from(document.querySelectorAll('input[type="file"]'))
+                .map(el => {
+                    const id = el.id || '';
+                    const lbl = id ? document.querySelector('label[for="' + id + '"]') : null;
+                    const lblText = lbl ? lbl.innerText.toLowerCase() : '';
+                    let ctx = lblText + ' ' + (el.name || '').toLowerCase()
+                              + ' ' + id.toLowerCase();
+                    // Walk up 6 ancestors collecting text
+                    let node = el.parentElement;
+                    for (let d = 0; d < 6; d++) {
+                        if (!node) break;
+                        ctx += ' ' + (node.getAttribute('aria-label') || '').toLowerCase();
+                        for (const c of node.childNodes)
+                            if (c.nodeType === 3) ctx += ' ' + c.textContent.toLowerCase();
+                        node = node.parentElement;
+                    }
+                    if (!/cover.?letter|covering.?letter/.test(ctx)) return null;
+                    return { id, hasFile: el.files != null && el.files.length > 0 };
+                })
+                .filter(Boolean);
+        }""")
+    except Exception:
+        return
+
+    if not cl_inputs:
+        return  # Form has no cover letter field — nothing to check.
+
+    already_filled = [f for f in cl_inputs if f.get("hasFile")]
+    if already_filled:
+        _log("Cover letter field is filled ✓")
+        return
+
+    # Field exists but is empty.
+    cl_text = ((job or {}).get("cover_letter") or "").strip()
+    if not cl_text:
+        _log("⚠ Cover letter field found but no cover letter text — fill manually in the browser")
+        return
+
+    # Generate the PDF and upload to every unfilled CL input.
+    from utils.form_filler import _resolve_cover_letter_path
+    file_path = _resolve_cover_letter_path({}, job)
+    if not file_path:
+        _log("⚠ Cover letter field found but PDF generation failed — fill manually")
+        return
+
+    _log("Cover letter not yet uploaded — retrying now…")
+    success = False
+    for field_info in cl_inputs:
+        if field_info.get("hasFile"):
+            continue
+        fid = field_info.get("id", "")
+        try:
+            if fid:
+                el_loc = page.locator(f'[id="{fid}"]').first
+                if await el_loc.count() > 0:
+                    await el_loc.set_input_files(file_path)
+                    try:
+                        await page.evaluate(
+                            "id => { const el = document.getElementById(id); if (el) {"
+                            " el.dispatchEvent(new Event('input', {bubbles:true}));"
+                            " el.dispatchEvent(new Event('change', {bubbles:true})); } }",
+                            fid,
+                        )
+                    except Exception:
+                        pass
+                    success = True
+            else:
+                # No id — target all cover-letter file inputs by position
+                await page.locator("input[type='file']").first.set_input_files(file_path)
+                success = True
+        except Exception as exc:
+            _log(f"Cover letter retry failed ({exc}) — fill manually")
+    if success:
+        _log("Cover letter uploaded ✓")
 
 
 async def _fill_cover_letter_manually(page, job: Dict[str, Any]) -> None:

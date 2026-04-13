@@ -815,8 +815,11 @@ async def fill_form(
                     try:
                         # Use Locator (not ElementHandle) so React re-renders
                         # between resume and cover-letter uploads don't cause staleness.
+                        # "xpath=ancestor::div[1]//button" finds the upload button even
+                        # when it is nested inside a sibling div (Ashby pattern) — unlike
+                        # "xpath=../button" which only matches direct-child buttons.
                         btn_loc = page.locator(f'[id="{fid}"]').locator(
-                            "xpath=../button").first
+                            "xpath=ancestor::div[1]//button").first
                         if await btn_loc.count() > 0 and await btn_loc.is_visible():
                             async with _fc_page.expect_file_chooser(timeout=5000) as fc_info:
                                 await btn_loc.click()
