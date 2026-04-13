@@ -1797,6 +1797,16 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
     try:
         from fpdf import FPDF
 
+        def _to_latin1(s: str) -> str:
+            _MAP = str.maketrans({
+                "\u2018": "'", "\u2019": "'",
+                "\u201c": '"', "\u201d": '"',
+                "\u2013": "-", "\u2014": "-",
+                "\u2026": "...",
+                "\u00a0": " ",
+            })
+            return s.translate(_MAP).encode("latin-1", errors="replace").decode("latin-1")
+
         fname = f"cover_letter_{company_slug}.pdf"
         path = os.path.join(tempfile.gettempdir(), fname)
         pdf = FPDF()
@@ -1807,9 +1817,7 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
             para = para.strip()
             if not para:
                 continue
-            # fpdf2 built-in fonts are Latin-1; replace unmappable chars.
-            safe = para.encode("latin-1", errors="replace").decode("latin-1")
-            pdf.multi_cell(0, 6, safe)
+            pdf.multi_cell(0, 6, _to_latin1(para))
             pdf.ln(3)
         # Write bytes → file (avoids re-opening a file already read by Playwright).
         pdf_bytes = pdf.output()

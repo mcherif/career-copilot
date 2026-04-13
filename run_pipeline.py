@@ -1351,7 +1351,7 @@ def ui_cmd(port: int, no_browser: bool):
     if not no_browser:
         webbrowser.open(url)
     click.echo(f"Starting Career Copilot UI at {url}")
-    uvicorn.run("ui.app:app", host="127.0.0.1", port=port, reload=False)
+    uvicorn.run("ui.app:app", host="127.0.0.1", port=port, reload=False, timeout_graceful_shutdown=3)
 
 
 if __name__ == '__main__':

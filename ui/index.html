@@ -572,6 +572,12 @@ function renderCard(i, direction) {
   const job = jobs[i];
   if (!job) return;
 
+  // Clear stale prefill status from a previous job's apply session.
+  const prefillPanel = document.getElementById('prefillStatus');
+  if (prefillPanel) prefillPanel.style.display = 'none';
+  _prefillFormFilled = false;
+  if (_prefillPollTimer) { clearInterval(_prefillPollTimer); _prefillPollTimer = null; }
+
   const card = document.getElementById('jobCard');
   card.classList.remove('slide-in');
   void card.offsetWidth;
@@ -890,8 +896,7 @@ async function openApply() {
 async function confirmApplied(didApply) {
   document.getElementById('applyConfirm').classList.remove('show');
   if (didApply) {
-    // Kill the prefill browser session — application is done.
-    try { await fetch('/api/prefill/stop', { method: 'POST' }); } catch(_) {}
+    // update_status('applied') already sets _prefill_cancel on the server side.
     await triageAction('applied');
   }
 }

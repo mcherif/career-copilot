@@ -440,22 +440,30 @@ async def download_cover_pdf(job_id: int):
         except ImportError as exc:
             raise HTTPException(500, f"fpdf2 not installed: {exc}") from exc
 
+        def _to_latin1(s: str) -> str:
+            """Map common Unicode typographic chars to Latin-1 equivalents."""
+            _MAP = str.maketrans({
+                "\u2018": "'", "\u2019": "'",   # left/right single quotes
+                "\u201c": '"', "\u201d": '"',   # left/right double quotes
+                "\u2013": "-", "\u2014": "-",   # en/em dash
+                "\u2026": "...",                 # ellipsis
+                "\u00a0": " ",                   # non-breaking space
+            })
+            return s.translate(_MAP).encode("latin-1", errors="replace").decode("latin-1")
+
         pdf = FPDF()
         pdf.set_margins(25, 25, 25)
         pdf.add_page()
         pdf.set_font("Helvetica", "B", 13)
-        header = f"{title} — {company}"
-        safe_header = header.encode("latin-1", errors="replace").decode("latin-1")
         from fpdf.enums import XPos, YPos
-        pdf.cell(0, 8, safe_header, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, _to_latin1(f"{title} - {company}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(4)
         pdf.set_font("Helvetica", size=11)
         for para in text.split("\n\n"):
             para = para.strip()
             if not para:
                 continue
-            safe = para.encode("latin-1", errors="replace").decode("latin-1")
-            pdf.multi_cell(0, 6, safe)
+            pdf.multi_cell(0, 6, _to_latin1(para))
             pdf.ln(3)
 
         buf = io.BytesIO(pdf.output())
@@ -675,9 +683,13 @@ async def get_prefill_status():
 @app.post("/api/prefill/stop")
 async def stop_prefill():
     _prefill_cancel.set()
+    # Check status without holding the lock when logging — _prefill_log itself
+    # acquires _prefill_lock, so calling it inside another with _prefill_lock
+    # would deadlock (threading.Lock is not reentrant).
     with _prefill_lock:
-        if _prefill["status"] == "running":
-            _prefill_log("Stop requested by user.")
+        was_running = _prefill["status"] == "running"
+    if was_running:
+        _prefill_log("Stop requested by user.")
     return {"ok": True}
 
 
