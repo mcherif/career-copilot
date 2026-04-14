@@ -34,6 +34,7 @@ from connectors.euremotejobs import EURemoteJobsConnector
 from connectors.remoteaijobs import RemoteAIJobsConnector
 from connectors.nodesk import NodeskConnector
 from connectors.remote100k import Remote100kConnector
+from connectors.wearedistributed import WeAreDistributedConnector
 from utils.dedup import is_duplicate
 from utils.application_filter import has_already_applied
 from utils.llm_analysis import analyze_job_with_ollama
@@ -66,6 +67,7 @@ CONNECTORS = {
     "remoteaijobs": RemoteAIJobsConnector,
     "nodesk": NodeskConnector,
     "remote100k": Remote100kConnector,
+    "wearedistributed": WeAreDistributedConnector,
 }
 
 # Job listing domains that block Playwright (bot detection / OAuth walls).
