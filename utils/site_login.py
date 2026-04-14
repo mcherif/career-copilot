@@ -93,7 +93,66 @@ async def try_site_login(
             _log(f"Himalayas login failed: {exc}")
             return False
 
+    if "flexa.careers" in url_lower:
+        return await _flexa_linkedin_login(page, _log)
+
     return False
+
+
+async def _flexa_linkedin_login(page, _log) -> bool:
+    """Handle the Flexa Careers LinkedIn OAuth login gate.
+
+    Flexa requires authentication to access the employer apply link.
+    When a LinkedIn sign-in button is visible on the page, this handler
+    clicks it and waits up to 3 minutes for the user to complete the
+    OAuth flow interactively.  The resulting session is saved to disk by
+    the caller so subsequent visits restore cookies and skip login.
+    """
+    _LINKEDIN_SELECTORS = [
+        "button:has-text('Continue with LinkedIn')",
+        "a:has-text('Continue with LinkedIn')",
+        "button:has-text('Sign in with LinkedIn')",
+        "a:has-text('Sign in with LinkedIn')",
+        "button:has-text('LinkedIn')",
+        "a:has-text('LinkedIn')",
+        "[aria-label*='LinkedIn' i]",
+    ]
+
+    # Only act if a LinkedIn auth button is actually visible.
+    linkedin_btn = None
+    for selector in _LINKEDIN_SELECTORS:
+        try:
+            btn = page.locator(selector).first
+            if await btn.count() > 0 and await btn.is_visible(timeout=1500):
+                linkedin_btn = btn
+                break
+        except Exception:
+            continue
+
+    if linkedin_btn is None:
+        return False  # Not a login gate — no action needed.
+
+    _log("Flexa login required — clicking 'Continue with LinkedIn'…")
+    try:
+        await linkedin_btn.click()
+        _log("LinkedIn sign-in window opened — complete the login in the browser…")
+    except Exception as exc:
+        _log(f"Could not click LinkedIn button ({exc}) — log in manually.")
+
+    # Wait up to 3 minutes for navigation away from any auth-related path.
+    try:
+        await page.wait_for_function(
+            "() => !window.location.href.includes('/login')"
+            "   && !window.location.href.includes('/signin')"
+            "   && !window.location.href.includes('/auth')"
+            "   && !window.location.href.includes('linkedin.com')",
+            timeout=180_000,
+        )
+        _log("Logged in to Flexa — session will be saved for future runs.")
+        return True
+    except Exception:
+        _log("Flexa login not completed within 3 minutes — continuing in manual mode.")
+        return False
 
 
 async def _jobcopilot_google_login(page, _log) -> bool:

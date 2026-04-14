@@ -87,14 +87,19 @@ async def run_prefill_session(
 
     # Determine whether this job needs a persisted browser session.
     # euremotejobs jobs redirect to euremote.jobcopilot.com for login.
-    _SESSION_DOMAIN = "jobcopilot.com"
-    _needs_session = (
-        job.get("source") == "euremotejobs"
-        or "jobcopilot.com" in url
-    )
+    # flexa.careers requires LinkedIn OAuth authentication.
+    if job.get("source") == "flexa" or "flexa.careers" in url:
+        _SESSION_DOMAIN: str | None = "flexa.careers"
+        _needs_session = True
+    elif job.get("source") == "euremotejobs" or "jobcopilot.com" in url:
+        _SESSION_DOMAIN = "jobcopilot.com"
+        _needs_session = True
+    else:
+        _SESSION_DOMAIN = None
+        _needs_session = False
 
     from utils.site_login import session_state_path, save_session_state
-    _saved_state = session_state_path(_SESSION_DOMAIN) if _needs_session else None
+    _saved_state = session_state_path(_SESSION_DOMAIN) if _needs_session and _SESSION_DOMAIN else None
 
     try:
         async with async_playwright() as pw:
@@ -102,7 +107,7 @@ async def run_prefill_session(
             _ctx_kwargs: dict = {}
             if _saved_state:
                 _ctx_kwargs["storage_state"] = _saved_state
-                _log("Restoring saved jobcopilot.com session…")
+                _log(f"Restoring saved {_SESSION_DOMAIN} session…")
             context = await browser.new_context(**_ctx_kwargs)
             page = await context.new_page()
 
@@ -315,11 +320,11 @@ async def run_prefill_session(
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
 
-            # Persist session state so the next jobcopilot visit skips login.
-            if _needs_session:
+            # Persist session state so the next visit skips login.
+            if _needs_session and _SESSION_DOMAIN:
                 try:
                     await save_session_state(context, _SESSION_DOMAIN)
-                    _log("jobcopilot.com session saved.")
+                    _log(f"{_SESSION_DOMAIN} session saved.")
                 except Exception:
                     pass
 
