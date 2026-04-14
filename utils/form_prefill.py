@@ -617,7 +617,7 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
         def _parse_date(date_str: str):
             parts = date_str.split()
             month = parts[0] if len(parts) >= 1 else ""
-            year  = parts[1] if len(parts) >= 2 else parts[0] if parts[0].isdigit() else ""
+            year  = parts[1] if len(parts) >= 2 else (parts[0] if len(parts) >= 1 and parts[0].isdigit() else "")
             return month, year
 
         from_month, from_year = _parse_date(date_from)

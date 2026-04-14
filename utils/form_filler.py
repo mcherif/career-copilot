@@ -682,9 +682,12 @@ async def fill_form(
                                 opt_texts = [o["t"] for o in option_data]
                                 opt_vals = [o["v"] for o in option_data]
                                 chosen_val = None
-                                # 1. Simple partial match (e.g. "male" in "Male").
+                                # 1. Bidirectional partial match (e.g. "male" in "Male",
+                                #    or option "University of British Columbia" inside
+                                #    value "The University of British Columbia").
+                                _vl = value.lower()
                                 for t, v in zip(opt_texts, opt_vals):
-                                    if value.lower() in t.lower():
+                                    if _vl in t.lower() or t.lower() in _vl:
                                         chosen_val = v
                                         break
                                 # 2. Demographic synonym match (gender, disability, veteran, etc.)
@@ -1950,6 +1953,23 @@ async def _select_combobox_option(
         await asyncio.sleep(0.5)
         aria_controls = await el.get_attribute("aria-controls") or ""
         opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
+
+    # Some comboboxes are div/button wrappers (is_input=False) that reveal an
+    # inner <input> search field when opened (e.g. Greenhouse school selector).
+    # When no options appeared after clicking, try to find and type into that
+    # inner input — then fall through to the normal fallback-terms logic.
+    if not opts and not is_input:
+        try:
+            inner = page.locator("input[type='search']:visible, input[type='text']:visible").last
+            if await inner.count() > 0 and await inner.is_visible(timeout=1000):
+                el = inner
+                is_input = True
+                await el.fill(value)
+                await asyncio.sleep(0.5)
+                aria_controls = await el.get_attribute("aria-controls") or ""
+                opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
+        except Exception:
+            pass
 
     # If typing the full value produced no options, retry with shorter search
     # terms so the dropdown has something to filter on.  Strategy:
