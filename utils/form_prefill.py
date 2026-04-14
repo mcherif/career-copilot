@@ -471,7 +471,7 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
                 btn = page.locator(sel).last
                 if await btn.count() > 0 and await btn.is_visible(timeout=500):
                     await btn.click()
-                    await page.wait_for_timeout(800)
+                    await page.wait_for_timeout(1200)
                     clicked = True
                     _log(f"Employment history: clicked 'Add another' for {company}")
                     break
@@ -484,25 +484,73 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
 
         # After clicking, new input fields appear at the bottom of the group list.
         # Target the *last* set of inputs matching each label pattern.
+        # Uses a single JS call to collect placeholder / aria-label / name /
+        # <label for="id"> text for the last N visible inputs, then fills by id/name.
         async def _fill_last(pattern: re.Pattern, value: str) -> bool:
             if not value:
                 return False
             try:
-                # Broad sweep: find all visible text inputs near a label matching the pattern.
-                all_inputs = page.locator("input[type='text'], input:not([type]), input[type='month'], input[type='date']")
-                count = await all_inputs.count()
-                for i in range(count - 1, max(count - 12, -1), -1):
-                    inp = all_inputs.nth(i)
+                candidates = await page.evaluate("""(maxBack) => {
+                    const sel = "input[type='text'], input:not([type]), " +
+                                "input[type='month'], input[type='date']";
+                    const inputs = Array.from(document.querySelectorAll(sel))
+                        .filter(el => {
+                            const r = el.getBoundingClientRect();
+                            if (r.width === 0 && r.height === 0) return false;
+                            const s = window.getComputedStyle(el);
+                            return s.display !== 'none' && s.visibility !== 'hidden';
+                        });
+                    const slice = inputs.slice(Math.max(0, inputs.length - maxBack));
+                    return slice.reverse().map(inp => {
+                        let labelText = '';
+                        if (inp.id) {
+                            const lbl = document.querySelector('label[for="' + inp.id + '"]');
+                            if (lbl) labelText = lbl.innerText || '';
+                        }
+                        if (!labelText) {
+                            let node = inp.parentElement;
+                            for (let d = 0; d < 5; d++) {
+                                if (!node) break;
+                                if (node.tagName === 'LABEL') {
+                                    labelText = node.innerText || ''; break;
+                                }
+                                const sib = node.previousElementSibling;
+                                if (sib && sib.tagName === 'LABEL') {
+                                    labelText = sib.innerText || ''; break;
+                                }
+                                node = node.parentElement;
+                            }
+                        }
+                        return {
+                            id: inp.id || '',
+                            name: inp.name || '',
+                            placeholder: inp.placeholder || '',
+                            ariaLabel: inp.getAttribute('aria-label') || '',
+                            labelText: labelText.trim(),
+                        };
+                    });
+                }""", 20)
+
+                for cand in candidates:
+                    hint = " ".join(filter(None, [
+                        cand.get("placeholder", ""),
+                        cand.get("ariaLabel", ""),
+                        cand.get("labelText", ""),
+                        cand.get("name", ""),
+                    ]))
+                    if not pattern.search(hint):
+                        continue
+                    cand_id   = cand.get("id", "")
+                    cand_name = cand.get("name", "")
+                    if cand_id:
+                        el = page.locator(f"#{cand_id}").first
+                    elif cand_name:
+                        el = page.locator(f"[name='{cand_name}']").last
+                    else:
+                        continue
                     try:
-                        if not await inp.is_visible(timeout=200):
-                            continue
-                        # Check the nearest label / placeholder / aria-label.
-                        placeholder = await inp.get_attribute("placeholder") or ""
-                        aria_label  = await inp.get_attribute("aria-label") or ""
-                        hint = placeholder + " " + aria_label
-                        if pattern.search(hint):
-                            await inp.fill(value)
-                            return True
+                        await el.fill(value)
+                        return True
                     except Exception:
                         continue
             except Exception:
