@@ -88,9 +88,9 @@ _OUTPUT_SCHEMA = {
     ],
     "education": [
         {
-            "institution": "string",
-            "degree": "string",
-            "field": "string or null",
+            "school": "string (full institution name)",
+            "degree": "string (e.g. 'Bachelor\\'s', 'Master\\'s', 'PhD')",
+            "field": "string or null (field of study / major)",
             "from": "string or null",
             "to": "string or null",
         }
@@ -103,8 +103,8 @@ _SCHEMA_JSON = json.dumps(_OUTPUT_SCHEMA, indent=2)
 
 
 def _build_prompt(resume_text: str) -> str:
-    # Truncate to avoid token limits (~6000 chars is safe for most local models)
-    truncated = resume_text[:6000]
+    # Truncate to avoid token limits (~12000 chars covers most full resumes)
+    truncated = resume_text[:12000]
     return "\n".join([
         "Resume text:",
         truncated,
@@ -174,6 +174,14 @@ def build_profile_yaml(
     base: Dict[str, Any] = existing or {}
 
     personal = dict(base.get("personal") or {})
+
+    # Infer current_company / current_title from the most recent work entry
+    # when the LLM didn't return them directly.
+    _wh = parsed.get("work_history") or []
+    _first_wh = _wh[0] if isinstance(_wh, list) and _wh and isinstance(_wh[0], dict) else {}
+    _inferred_company = _safe_str(_first_wh.get("company"))
+    _inferred_title   = _safe_str(_first_wh.get("title"))
+
     personal.update({
         k: v for k, v in {
             "name": _safe_str(parsed.get("name")),
@@ -182,7 +190,8 @@ def build_profile_yaml(
             "linkedin": _safe_str(parsed.get("linkedin")),
             "github": _safe_str(parsed.get("github")),
             "location": _safe_str(parsed.get("location")),
-            "current_title": _safe_str(parsed.get("current_title")),
+            "current_title": _safe_str(parsed.get("current_title")) or _inferred_title,
+            "current_company": _safe_str(parsed.get("current_company")) or _inferred_company,
             "years_experience": parsed.get("years_experience"),
         }.items()
         if v is not None
@@ -207,13 +216,19 @@ def build_profile_yaml(
     for entry in (parsed.get("education") or []):
         if not isinstance(entry, dict):
             continue
-        education.append({
-            "institution": _safe_str(entry.get("institution")) or "",
+        # Accept both "school" and "institution" from the LLM output.
+        school = _safe_str(entry.get("school") or entry.get("institution")) or ""
+        edu: Dict[str, Any] = {
+            "school": school,
             "degree": _safe_str(entry.get("degree")) or "",
-            "field": _safe_str(entry.get("field")),
-            "from": _safe_str(entry.get("from")),
-            "to": _safe_str(entry.get("to")),
-        })
+        }
+        if field := _safe_str(entry.get("field")):
+            edu["field"] = field
+        if from_ := _safe_str(entry.get("from")):
+            edu["from"] = from_
+        if to_ := _safe_str(entry.get("to")):
+            edu["to"] = to_
+        education.append(edu)
 
     profile: Dict[str, Any] = {
         "personal": personal,

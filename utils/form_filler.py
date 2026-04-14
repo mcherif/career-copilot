@@ -30,6 +30,12 @@ from playwright.async_api import Page
 # The FIRST rule whose keywords all appear in the normalised label wins.
 # ---------------------------------------------------------------------------
 _TEXT_RULES: list[tuple[list[str], Any]] = [
+    # Company / employer name rules MUST come before the generic "name" rule
+    # so "company name" label hits the right rule first.
+    (["current company"], lambda p, j: p.get("personal", {}).get("current_company", "")),
+    (["current employer"], lambda p, j: p.get("personal", {}).get("current_company", "")),
+    (["company name"], lambda p, j: p.get("personal", {}).get("current_company", "")),
+    (["organization"], lambda p, j: p.get("personal", {}).get("current_company", "")),
     # First/last name rules must come before the generic "name" rule.
     (["first name"], lambda p, j: (
         p.get("personal", {}).get("name", "") or "").split()[0]),
@@ -143,11 +149,6 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["current position"], lambda p, j: p.get("personal", {}).get("current_title", "")),
     (["current role"], lambda p, j: p.get("personal", {}).get("current_title", "")),
     (["job title"], lambda p, j: p.get("personal", {}).get("current_title", "")),
-    # Current employer / company name.
-    (["current company"], lambda p, j: p.get("personal", {}).get("current_company", "")),
-    (["current employer"], lambda p, j: p.get("personal", {}).get("current_company", "")),
-    (["company name"], lambda p, j: p.get("personal", {}).get("current_company", "")),
-    (["organization"], lambda p, j: p.get("personal", {}).get("current_company", "")),
     # "org" is Lever's name attribute for the current company field.
     (["org"], lambda p, j: p.get("personal", {}).get("current_company", "")),
     # Cover letter field — use the pre-generated cover letter.
@@ -194,6 +195,17 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["speak fluently"], lambda p, j: ", ".join(p.get("languages", []))),
     (["languages do you speak"], lambda p, j: ", ".join(p.get("languages", []))),
     (["spoken language"], lambda p, j: ", ".join(p.get("languages", []))),
+    # Education — school / degree from the first education entry in the profile.
+    (["school"], lambda p, j: (p.get("education") or [{}])[0].get("school", "")),
+    (["university"], lambda p, j: (p.get("education") or [{}])[0].get("school", "")),
+    (["college"], lambda p, j: (p.get("education") or [{}])[0].get("school", "")),
+    (["institution"], lambda p, j: (p.get("education") or [{}])[0].get("school", "")),
+    (["degree"], lambda p, j: (p.get("education") or [{}])[0].get("degree", "")),
+    (["highest degree"], lambda p, j: (p.get("education") or [{}])[0].get("degree", "")),
+    (["highest level", "education"], lambda p, j: (p.get("education") or [{}])[0].get("degree", "")),
+    (["field of study"], lambda p, j: (p.get("education") or [{}])[0].get("field", "")),
+    (["major"], lambda p, j: (p.get("education") or [{}])[0].get("field", "")),
+    (["discipline"], lambda p, j: (p.get("education") or [{}])[0].get("field", "")),
 ]
 
 # Timezone label keyword → profile timezone values that match (lowercase)
@@ -1198,13 +1210,32 @@ def _resolve_text_value(label_lower: str, profile: dict, job: dict) -> str:
     (e.g. "city" substring-matching inside "ethnicity").
     Multi-word keywords (e.g. "first name") are still matched as substrings.
     """
-    # Pre-pass: if the label is a bare "name" inside an employment section context
-    # (e.g. Greenhouse "Employment > Name"), return the current company rather than
-    # the candidate's personal name.
     label_words_set = set(re.findall(r"\w+", label_lower))
-    if label_words_set <= {"name", "company"} or label_lower.strip() in ("name", "company name"):
-        if any(word in label_lower for word in _EMPLOYMENT_SECTION_WORDS):
-            return profile.get("personal", {}).get("current_company", "") or ""
+
+    # Pre-pass: if the label is a "company name" / bare "name" field inside an
+    # employment section context (e.g. Greenhouse "Employment > Company name"),
+    # return the current company rather than the candidate's personal name.
+    # Condition: "name" is in the label AND no first/last qualifier AND either
+    # "company"/"employer" is also present OR the label (stripped of employment
+    # section noise) is just "name".
+    _emp_ctx = any(word in label_lower for word in _EMPLOYMENT_SECTION_WORDS)
+    _clean_words = label_words_set - frozenset({
+        "employment", "employer", "work", "history", "experience",
+        "previous", "job", "of",
+    })
+    if (
+        _emp_ctx
+        and "name" in label_words_set
+        and "first" not in label_words_set
+        and "last" not in label_words_set
+        and ("company" in label_words_set or _clean_words <= {"name"})
+    ):
+        return profile.get("personal", {}).get("current_company", "") or ""
+
+    # Pre-pass: "start date year" / "start date month" are employment date
+    # sub-fields — do not match the generic "start date" availability rule.
+    if "start" in label_words_set and ("year" in label_words_set or "month" in label_words_set):
+        return ""
 
     # Pre-pass: if the label is a work-auth question that names a specific country,
     # check authorization for THAT country rather than the job's location.
@@ -1920,21 +1951,32 @@ async def _select_combobox_option(
         aria_controls = await el.get_attribute("aria-controls") or ""
         opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
 
-    # If typing the full value (e.g. "Tunis, Tunisia") produced no options,
-    # retry with shorter alternatives so the dropdown has something to show:
-    #   1. Country part only: "Tunisia" from "Tunis, Tunisia"
-    #   2. City/first word: "Tunis"
-    # This gives the LLM meaningful options to choose from.
+    # If typing the full value produced no options, retry with shorter search
+    # terms so the dropdown has something to filter on.  Strategy:
+    #   - Comma-separated ("Tunis, Tunisia"): try country part, then city.
+    #   - Space-separated multi-word ("The University of British Columbia"):
+    #     skip leading articles, then try from the back (most distinctive
+    #     words first): "British Columbia", "Columbia", each significant word.
+    _ARTICLES = {"the", "a", "an", "of", "at", "in"}
     if not opts and is_input and ("," in value or " " in value):
-        fallback_terms = []
+        fallback_terms: list[str] = []
         if "," in value:
             fallback_terms.append(value.split(",")[-1].strip())   # country
             fallback_terms.append(value.split(",")[0].strip())    # city
         else:
-            fallback_terms.append(value.split()[0].strip())
+            words = value.split()
+            # Strip leading articles to get the meaningful part.
+            sig = [w for w in words if w.lower() not in _ARTICLES]
+            # Try progressively shorter suffixes (e.g. "British Columbia", "Columbia")
+            for n in range(min(3, len(sig)), 0, -1):
+                fallback_terms.append(" ".join(sig[-n:]))
+            # Also try each significant word individually as a last resort.
+            fallback_terms.extend(sig)
+        seen: set[str] = set()
         for term in fallback_terms:
-            if not term:
+            if not term or term in seen or term.lower() == value.lower():
                 continue
+            seen.add(term)
             await el.fill(term)
             await asyncio.sleep(0.5)
             aria_controls = await el.get_attribute("aria-controls") or ""

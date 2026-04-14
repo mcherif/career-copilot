@@ -483,55 +483,59 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
             break
 
         # After clicking, new input fields appear at the bottom of the group list.
-        # Target the *last* set of inputs matching each label pattern.
-        # Uses a single JS call to collect placeholder / aria-label / name /
-        # <label for="id"> text for the last N visible inputs, then fills by id/name.
+        # Uses a single JS call to collect label/placeholder/name for recent
+        # visible inputs *and* select elements, then fills by id/name.
+
+        _JS_COLLECT = """(maxBack) => {
+            function getLabel(el) {
+                if (el.id) {
+                    const lbl = document.querySelector('label[for="' + el.id + '"]');
+                    if (lbl) return lbl.innerText || '';
+                }
+                let node = el.parentElement;
+                for (let d = 0; d < 5; d++) {
+                    if (!node) break;
+                    if (node.tagName === 'LABEL') return node.innerText || '';
+                    const sib = node.previousElementSibling;
+                    if (sib && sib.tagName === 'LABEL') return sib.innerText || '';
+                    node = node.parentElement;
+                }
+                return '';
+            }
+            const inputSel = "input[type='text'], input:not([type]), " +
+                             "input[type='month'], input[type='date']";
+            const selectSel = "select";
+            function visible(el) {
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 && r.height === 0) return false;
+                const s = window.getComputedStyle(el);
+                return s.display !== 'none' && s.visibility !== 'hidden';
+            }
+            const inputs  = Array.from(document.querySelectorAll(inputSel)).filter(visible);
+            const selects = Array.from(document.querySelectorAll(selectSel)).filter(visible);
+            const inputSlice  = inputs.slice(Math.max(0, inputs.length - maxBack)).reverse();
+            const selectSlice = selects.slice(Math.max(0, selects.length - maxBack)).reverse();
+            const map = el => ({
+                tag: el.tagName.toLowerCase(),
+                id: el.id || '',
+                name: el.name || '',
+                placeholder: el.placeholder || '',
+                ariaLabel: el.getAttribute('aria-label') || '',
+                labelText: getLabel(el).trim(),
+                options: el.tagName === 'SELECT'
+                    ? Array.from(el.options).map(o => o.text.trim())
+                    : [],
+            });
+            return { inputs: inputSlice.map(map), selects: selectSlice.map(map) };
+        }"""
+
         async def _fill_last(pattern: re.Pattern, value: str) -> bool:
+            """Fill the last visible text input matching *pattern* with *value*."""
             if not value:
                 return False
             try:
-                candidates = await page.evaluate("""(maxBack) => {
-                    const sel = "input[type='text'], input:not([type]), " +
-                                "input[type='month'], input[type='date']";
-                    const inputs = Array.from(document.querySelectorAll(sel))
-                        .filter(el => {
-                            const r = el.getBoundingClientRect();
-                            if (r.width === 0 && r.height === 0) return false;
-                            const s = window.getComputedStyle(el);
-                            return s.display !== 'none' && s.visibility !== 'hidden';
-                        });
-                    const slice = inputs.slice(Math.max(0, inputs.length - maxBack));
-                    return slice.reverse().map(inp => {
-                        let labelText = '';
-                        if (inp.id) {
-                            const lbl = document.querySelector('label[for="' + inp.id + '"]');
-                            if (lbl) labelText = lbl.innerText || '';
-                        }
-                        if (!labelText) {
-                            let node = inp.parentElement;
-                            for (let d = 0; d < 5; d++) {
-                                if (!node) break;
-                                if (node.tagName === 'LABEL') {
-                                    labelText = node.innerText || ''; break;
-                                }
-                                const sib = node.previousElementSibling;
-                                if (sib && sib.tagName === 'LABEL') {
-                                    labelText = sib.innerText || ''; break;
-                                }
-                                node = node.parentElement;
-                            }
-                        }
-                        return {
-                            id: inp.id || '',
-                            name: inp.name || '',
-                            placeholder: inp.placeholder || '',
-                            ariaLabel: inp.getAttribute('aria-label') || '',
-                            labelText: labelText.trim(),
-                        };
-                    });
-                }""", 20)
-
-                for cand in candidates:
+                data = await page.evaluate(_JS_COLLECT, 20)
+                for cand in data.get("inputs", []):
                     hint = " ".join(filter(None, [
                         cand.get("placeholder", ""),
                         cand.get("ariaLabel", ""),
@@ -557,10 +561,95 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
                 pass
             return False
 
+        async def _fill_select_last(pattern: re.Pattern, value: str) -> bool:
+            """Select an option in the last visible <select> matching *pattern*."""
+            if not value:
+                return False
+            val_lower = value.lower()
+            try:
+                data = await page.evaluate(_JS_COLLECT, 20)
+                for cand in data.get("selects", []):
+                    hint = " ".join(filter(None, [
+                        cand.get("ariaLabel", ""),
+                        cand.get("labelText", ""),
+                        cand.get("name", ""),
+                    ]))
+                    if not pattern.search(hint):
+                        continue
+                    options = cand.get("options", [])
+                    # Find best option: exact → starts-with → contains.
+                    chosen = next(
+                        (opt for opt in options if opt.lower() == val_lower), None
+                    )
+                    if not chosen:
+                        chosen = next(
+                            (opt for opt in options if opt.lower().startswith(val_lower[:3])),
+                            None,
+                        )
+                    if not chosen:
+                        chosen = next(
+                            (opt for opt in options if val_lower in opt.lower()), None
+                        )
+                    if not chosen:
+                        continue
+                    cand_id   = cand.get("id", "")
+                    cand_name = cand.get("name", "")
+                    if cand_id:
+                        el = page.locator(f"#{cand_id}").first
+                    elif cand_name:
+                        el = page.locator(f"[name='{cand_name}']").last
+                    else:
+                        continue
+                    try:
+                        await el.select_option(label=chosen)
+                        return True
+                    except Exception:
+                        try:
+                            await el.select_option(value=chosen)
+                            return True
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+            return False
+
+        # Parse "Feb 2022" → month abbreviation + 4-digit year.
+        def _parse_date(date_str: str):
+            parts = date_str.split()
+            month = parts[0] if len(parts) >= 1 else ""
+            year  = parts[1] if len(parts) >= 2 else parts[0] if parts[0].isdigit() else ""
+            return month, year
+
+        from_month, from_year = _parse_date(date_from)
+        to_month,   to_year   = _parse_date(date_to if date_to != "present" else "")
+
+        _START_MONTH_LABELS = re.compile(r"start.*(month|date)|start\s*date.*month", re.I)
+        _START_YEAR_LABELS  = re.compile(r"start.*(year)|start\s*date.*year", re.I)
+        _END_MONTH_LABELS   = re.compile(r"end.*(month|date)|end\s*date.*month", re.I)
+        _END_YEAR_LABELS    = re.compile(r"end.*(year)|end\s*date.*year", re.I)
+
         filled_company = await _fill_last(_COMPANY_LABELS, company)
         filled_title   = await _fill_last(_TITLE_LABELS, title)
-        filled_start   = await _fill_last(_START_LABELS, date_from)
-        filled_end     = await _fill_last(_END_LABELS, date_to if date_to != "present" else "")
+
+        # Start date: try month SELECT first, then year text input.
+        filled_start_month = await _fill_select_last(_START_MONTH_LABELS, from_month) if from_month else False
+        filled_start_year  = await _fill_last(_START_YEAR_LABELS, from_year) if from_year else False
+        # Fallback: if no month-specific SELECT found, try the broad start pattern as SELECT.
+        if not filled_start_month:
+            filled_start_month = await _fill_select_last(_START_LABELS, from_month) if from_month else False
+        if not filled_start_year:
+            filled_start_year = await _fill_last(_START_LABELS, from_year) if from_year else False
+        filled_start = filled_start_month or filled_start_year
+
+        # End date: same pattern.
+        filled_end_month = await _fill_select_last(_END_MONTH_LABELS, to_month) if to_month else False
+        filled_end_year  = await _fill_last(_END_YEAR_LABELS, to_year) if to_year else False
+        if not filled_end_month:
+            filled_end_month = await _fill_select_last(_END_LABELS, to_month) if to_month else False
+        if not filled_end_year:
+            filled_end_year = await _fill_last(_END_LABELS, to_year) if to_year else False
+        filled_end = filled_end_month or filled_end_year
+
         _log(
             f"Employment history: filled {company!r} — "
             f"company={filled_company} title={filled_title} "
