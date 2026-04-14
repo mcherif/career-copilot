@@ -6,6 +6,7 @@ Or directly: uvicorn ui.app:app --port 7860
 """
 import asyncio
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -515,6 +516,85 @@ def _cancel_existing_prefill() -> None:
         _prefill["log"] = []
 
 
+def _scrape_job_meta(url: str) -> Dict[str, Any]:
+    """Fetch *url* and extract job title, company, and description.
+
+    Tries in order:
+    1. JSON-LD ``JobPosting`` schema (most reliable, used by Greenhouse,
+       Lever, Ashby, and most modern ATS pages for SEO).
+    2. OpenGraph ``og:title`` / ``og:site_name`` / ``og:description`` meta tags.
+    3. ``<title>`` tag — parsed on common separators (`` | ``, `` - ``, `` · ``).
+
+    Returns a dict with keys ``title``, ``company``, ``description``
+    (all strings, any may be empty if detection failed).
+    """
+    import requests as _req
+    try:
+        resp = _req.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; career-copilot/1.0)"}, timeout=10)
+        resp.raise_for_status()
+        html = resp.text
+    except Exception:
+        return {}
+
+    # --- 1. JSON-LD JobPosting ---
+    for m in re.finditer(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html, re.DOTALL | re.IGNORECASE,
+    ):
+        try:
+            data = json.loads(m.group(1).strip())
+        except Exception:
+            continue
+        if data.get("@type") == "JobPosting":
+            title = (data.get("title") or "").strip()
+            company = ((data.get("hiringOrganization") or {}).get("name") or "").strip()
+            description = (data.get("description") or "").strip()
+            if title or company:
+                return {"title": title, "company": company, "description": description}
+
+    # --- 2. OpenGraph meta tags ---
+    def _meta(prop: str) -> str:
+        m = re.search(
+            r'<meta[^>]+(?:property|name)=["\']' + re.escape(prop) + r'["\'][^>]+content=["\'](.*?)["\']',
+            html, re.IGNORECASE,
+        )
+        if not m:
+            # Also handle content= before property=
+            m = re.search(
+                r'<meta[^>]+content=["\'](.*?)["\'][^>]+(?:property|name)=["\']' + re.escape(prop) + r'["\']',
+                html, re.IGNORECASE,
+            )
+        return m.group(1).strip() if m else ""
+
+    og_title = _meta("og:title")
+    og_site  = _meta("og:site_name")
+    og_desc  = _meta("og:description")
+
+    # --- 3. <title> tag fallback ---
+    page_title_m = re.search(r'<title[^>]*>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
+    page_title = re.sub(r'<[^>]+>', '', page_title_m.group(1)).strip() if page_title_m else ""
+
+    inferred_title = og_title
+    inferred_company = og_site
+
+    if not inferred_title and page_title:
+        for sep in (" | ", " - ", " · ", " — "):
+            parts = [p.strip() for p in page_title.split(sep) if p.strip()]
+            if len(parts) >= 2:
+                inferred_title = parts[0]
+                if not inferred_company:
+                    inferred_company = parts[1]
+                break
+        if not inferred_title:
+            inferred_title = page_title
+
+    return {
+        "title": inferred_title,
+        "company": inferred_company,
+        "description": og_desc,
+    }
+
+
 def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> None:
     with _prefill_lock:
         _prefill["log"] = []
@@ -522,6 +602,34 @@ def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> No
         _prefill["status"] = "running"  # "starting" → "running" so the UI poll keeps going
 
     _prefill_log(f"Starting prefill for: {job_dict.get('title', '')} @ {job_dict.get('company', '')}")
+
+    # For direct URL fills, scrape the page to enrich missing title / company /
+    # description before the cover letter is generated.
+    if job_dict.get("source") == "direct" and (
+        not job_dict.get("company")
+        or not job_dict.get("title")
+        or job_dict.get("title") == "Direct Fill"
+        or not job_dict.get("description_text")
+    ):
+        _prefill_log("Scraping job metadata from URL…")
+        try:
+            meta = _scrape_job_meta(job_dict["url"])
+            if meta:
+                job_dict = dict(job_dict)
+                if meta.get("title") and (
+                    not job_dict.get("title") or job_dict.get("title") == "Direct Fill"
+                ):
+                    job_dict["title"] = meta["title"]
+                if meta.get("company") and not job_dict.get("company"):
+                    job_dict["company"] = meta["company"]
+                if meta.get("description") and not job_dict.get("description_text"):
+                    job_dict["description_text"] = meta["description"]
+                _prefill_log(
+                    f"Metadata: title={job_dict.get('title')!r}  "
+                    f"company={job_dict.get('company')!r}"
+                )
+        except Exception as exc:
+            _prefill_log(f"Metadata scrape failed: {exc}")
 
     # Auto-generate cover letter if the job doesn't have one yet.
     if not job_dict.get("cover_letter"):
