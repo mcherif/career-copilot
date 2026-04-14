@@ -1956,13 +1956,16 @@ async def _select_combobox_option(
 
     # Some comboboxes are div/button wrappers (is_input=False) that reveal an
     # inner <input> search field when opened (e.g. Greenhouse school selector).
-    # When no options appeared after clicking, try to find and type into that
-    # inner input — then fall through to the normal fallback-terms logic.
+    # After clicking, focus moves to that inner input — use document.activeElement
+    # rather than a broad visible-input scan to avoid typing into unrelated fields.
     if not opts and not is_input:
         try:
-            inner = page.locator("input[type='search']:visible, input[type='text']:visible").last
-            if await inner.count() > 0 and await inner.is_visible(timeout=1000):
-                el = inner
+            active = await page.evaluate(
+                "() => { const a = document.activeElement; "
+                "return a ? {tag: a.tagName.toLowerCase(), itype: (a.type||'').toLowerCase()} : {}; }"
+            )
+            if active.get("tag") == "input" and active.get("itype", "text") in ("text", "search", ""):
+                el = page.locator(":focus")
                 is_input = True
                 await el.fill(value)
                 await asyncio.sleep(0.5)
