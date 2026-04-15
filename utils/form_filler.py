@@ -1950,26 +1950,34 @@ async def _select_combobox_option(
     is_input = field.get("tag", "input") == "input"
     if not opts and is_input:
         await el.fill(value)
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1.0)
         aria_controls = await el.get_attribute("aria-controls") or ""
         opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
 
     # Some comboboxes are div/button wrappers (is_input=False) that reveal an
     # inner <input> search field when opened (e.g. Greenhouse school selector).
-    # After clicking, focus moves to that inner input — use document.activeElement
-    # rather than a broad visible-input scan to avoid typing into unrelated fields.
-    if not opts and not is_input:
+    # Always type the search value into the inner input — the initial unfiltered
+    # option list (if any appeared) may not contain the target; typing triggers
+    # server-side filtering.  Use document.activeElement for a stable reference.
+    if not is_input:
+        await asyncio.sleep(0.4)  # wait for dropdown to fully open and focus inner input
         try:
             active = await page.evaluate(
                 "() => { const a = document.activeElement; "
-                "return a ? {tag: a.tagName.toLowerCase(), itype: (a.type||'').toLowerCase()} : {}; }"
+                "return a ? {tag: a.tagName.toLowerCase(), "
+                "itype: (a.type||'').toLowerCase(), id: a.id || ''} : {}; }"
             )
             if active.get("tag") == "input" and active.get("itype", "text") in ("text", "search", ""):
-                el = page.locator(":focus")
+                # Prefer a stable ID-based locator so repeated fills in the
+                # fallback loop don't drift to a different focused element.
+                inner_id = active.get("id", "")
+                el = page.locator(f"[id='{inner_id}']").first if inner_id else page.locator(":focus")
                 is_input = True
                 await el.fill(value)
-                await asyncio.sleep(0.5)
-                aria_controls = await el.get_attribute("aria-controls") or ""
+                await asyncio.sleep(2.0)  # school lookups are server-side and slow
+                # The inner input may not carry aria-controls; preserve the outer's value.
+                inner_aria = await el.get_attribute("aria-controls") or ""
+                aria_controls = inner_aria or aria_controls
                 opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
         except Exception:
             pass
@@ -2001,7 +2009,7 @@ async def _select_combobox_option(
                 continue
             seen.add(term)
             await el.fill(term)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.2)  # school/location lookups can be slow
             aria_controls = await el.get_attribute("aria-controls") or ""
             opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
             if opts:

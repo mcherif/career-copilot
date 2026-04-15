@@ -435,9 +435,7 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
                 pass
 
     work_history = profile.get("work_history") or []
-    # First entry is already filled by fill_form; fill entries 2 onward.
-    extra_entries = work_history[1:]
-    if not extra_entries:
+    if not work_history:
         return
 
     # Selectors for the "Add another" button in employment sections.
@@ -452,208 +450,334 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
         "a:has-text('Add employment')",
     ]
 
-    # Field label patterns within each employment group.
-    _COMPANY_LABELS = re.compile(r"company|employer|organization", re.I)
-    _TITLE_LABELS   = re.compile(r"title|position|role", re.I)
-    _START_LABELS   = re.compile(r"start", re.I)
-    _END_LABELS     = re.compile(r"end|to\b", re.I)
+    # ---------------------------------------------------------------------------
+    # JS helpers: find the Nth visible labeled element and return its absolute
+    # index within all elements of that type.  We count labeled elements BEFORE
+    # clicking "Add another" to know which index belongs to the new entry —
+    # this works regardless of where Greenhouse inserts the new group in the DOM
+    # and regardless of whether elements have name/id attributes.
+    # ---------------------------------------------------------------------------
+    _GET_LABEL_FN = """
+        function getLabel(el) {
+            const id = el.id || '';
+            if (id) {
+                const lb = document.querySelector('label[for="' + id + '"]');
+                if (lb) return lb.innerText.trim();
+            }
+            const al = el.getAttribute('aria-label');
+            if (al && al.trim()) return al.trim();
+            const alb = el.getAttribute('aria-labelledby');
+            if (alb) {
+                const txt = alb.split(' ')
+                    .map(lid => document.getElementById(lid))
+                    .filter(Boolean)
+                    .map(e => e.innerText.trim())
+                    .filter(Boolean)
+                    .join(' ');
+                if (txt) return txt;
+            }
+            let node = el.parentElement;
+            for (let d = 0; d < 8; d++) {
+                if (!node) break;
+                if (node.tagName === 'LABEL') return node.innerText.trim();
+                if (node.id) {
+                    const lb = document.querySelector('label[for="' + node.id + '"]');
+                    if (lb) return lb.innerText.trim();
+                }
+                let sib = node.previousElementSibling;
+                while (sib) {
+                    if (sib.tagName === 'LABEL') return sib.innerText.trim();
+                    if (!sib.querySelector('input, textarea, select')) {
+                        const inner = sib.querySelector('label');
+                        if (inner) return inner.innerText.trim();
+                    }
+                    sib = sib.previousElementSibling;
+                }
+                node = node.parentElement;
+            }
+            return el.placeholder || '';
+        }
+        function visible(el) {
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+        }
+    """
 
-    for entry in extra_entries:
-        company  = str(entry.get("company") or "").strip()
-        title    = str(entry.get("title") or "").strip()
+    # Returns absolute DOM positions of all visible labeled text-inputs.
+    # Using the FULL querySelectorAll result (including CSS-hidden elements) so
+    # Playwright's .nth() targets the same element as the JS found.
+    # Excludes inputs that are *inside* a [role="combobox"] element — those are
+    # react-select's internal search inputs, which have no direct label and get
+    # misidentified by ancestor traversal (e.g. as "start year" or "end year").
+    _JS_LIST_INP_POS = f"""([labelRe]) => {{
+        {_GET_LABEL_FN}
+        const re = new RegExp(labelRe, 'i');
+        const sel = "input:not([type='hidden']):not([type='submit'])" +
+                    ":not([type='checkbox']):not([type='radio']):not([type='file'])";
+        const allEls = Array.from(document.querySelectorAll(sel));
+        return allEls
+            .filter(visible)
+            .filter(el => !el.closest('[role="combobox"]'))
+            .filter(el => re.test(getLabel(el)))
+            .map(el => allEls.indexOf(el));
+    }}"""
+
+    # Same but for native <select> and ARIA comboboxes.
+    _JS_LIST_DD_POS = f"""([labelRe]) => {{
+        {_GET_LABEL_FN}
+        const re = new RegExp(labelRe, 'i');
+        const sel = 'select, [role="combobox"]';
+        const allEls = Array.from(document.querySelectorAll(sel));
+        return allEls.filter(visible).filter(el => re.test(getLabel(el))).map(el => allEls.indexOf(el));
+    }}"""
+
+    _INP_SEL = ("input:not([type='hidden']):not([type='submit'])"
+                ":not([type='checkbox']):not([type='radio']):not([type='file'])")
+
+    async def _fill_at_idx(idx: int, value: str) -> bool:
+        """Fill the text-input at the given absolute DOM position."""
+        if not value:
+            return False
+        try:
+            el = page.locator(_INP_SEL).nth(idx)
+            # Diagnostic: log what element we're about to write to.
+            try:
+                info = await el.evaluate(
+                    "e => ({id: e.id, name: e.name, placeholder: e.placeholder, "
+                    "type: e.type, 'aria-label': e.getAttribute('aria-label'), "
+                    "label: (document.querySelector('label[for=\"'+e.id+'\"]') || {}).innerText || ''})"
+                )
+                _log(f"  fill_at_idx({idx}, {value!r}): id={info.get('id')!r} name={info.get('name')!r} label={info.get('label')!r}")
+            except Exception:
+                pass
+            try:
+                await el.fill(value)
+                return True
+            except Exception:
+                await el.click()
+                await el.press("Control+a")
+                await el.press_sequentially(value, delay=20)
+                return True
+        except Exception:
+            return False
+
+    async def _fill_dd_at_idx(idx: int, value: str) -> bool:
+        """Fill the select/combobox at the given absolute DOM position."""
+        if not value:
+            return False
+        val_lower = value.lower()
+        _visible_opts_js = """(listboxId) => {
+            const lb = listboxId ? document.getElementById(listboxId) : null;
+            const root = lb || document;
+            return Array.from(root.querySelectorAll('[role="option"]'))
+                .filter(o => { const r = o.getBoundingClientRect();
+                               return r.width > 0 && r.height > 0; })
+                .map(o => ({text: o.innerText.trim(), id: o.id}));
+        }"""
+        try:
+            el = page.locator('select, [role="combobox"]').nth(idx)
+            tag = (await el.evaluate("el => el.tagName.toLowerCase()")).lower()
+            if tag == "select":
+                opts = await el.evaluate("el => Array.from(el.options).map(o => o.text.trim())")
+                chosen = (
+                    next((o for o in opts if o.lower() == val_lower), None)
+                    or next((o for o in opts if o.lower().startswith(val_lower[:3])), None)
+                    or next((o for o in opts if val_lower in o.lower()), None)
+                )
+                if not chosen:
+                    return False
+                try:
+                    await el.select_option(label=chosen)
+                except Exception:
+                    await el.select_option(value=chosen)
+                return True
+            # ARIA combobox — click to open then pick the matching visible option.
+            await el.click(timeout=5000)
+            await page.wait_for_timeout(600)
+            aria_controls = await el.get_attribute("aria-controls") or ""
+            opts = await page.evaluate(_visible_opts_js, aria_controls)
+            _log(f"  dropdown(idx={idx}, {value!r}): aria={aria_controls!r} opts={[o['text'] for o in opts[:6]]}")
+            month_re = re.compile(val_lower[:3], re.I)
+            chosen = next((o for o in opts if month_re.search(o["text"])), None)
+            if chosen:
+                if chosen.get("id"):
+                    await page.locator(f'[id="{chosen["id"]}"]').first.click()
+                else:
+                    scoped = (page.locator(f'#{aria_controls} [role="option"]').filter(has_text=chosen["text"])
+                              if aria_controls else
+                              page.locator('[role="option"]').filter(has_text=chosen["text"]))
+                    await scoped.first.click()
+                return True
+        except Exception as exc:
+            _log(f"  dropdown(idx={idx}, {value!r}): exception: {exc}")
+        return False
+
+    def _new_els(pre: list, post: list) -> list:
+        """DOM positions that appeared in post but not pre (newly added elements)."""
+        pre_set = set(pre)
+        return [i for i in post if i not in pre_set]
+
+    # Parse "Feb 2022" → (month_str, year_str).
+    def _parse_date(date_str: str):
+        parts = date_str.split()
+        month = parts[0] if len(parts) >= 1 else ""
+        year  = (parts[1] if len(parts) >= 2
+                 else (parts[0] if len(parts) == 1 and parts[0].isdigit() else ""))
+        return month, year
+
+    async def _check_current_role(co_idx: int) -> bool:
+        """Tick the 'Current role' checkbox in the same employment section as the company input."""
+        _js = """([coIdx]) => {
+            const sel = "input:not([type='hidden']):not([type='submit'])" +
+                        ":not([type='checkbox']):not([type='radio']):not([type='file'])";
+            const allInputs = Array.from(document.querySelectorAll(sel));
+            const companyEl = allInputs[coIdx];
+            if (!companyEl) return -1;
+            let node = companyEl;
+            for (let d = 0; d < 12; d++) {
+                if (!node.parentElement) break;
+                node = node.parentElement;
+                const checkboxes = Array.from(node.querySelectorAll('input[type="checkbox"]'));
+                for (const cb of checkboxes) {
+                    const lbl = document.querySelector('label[for="' + cb.id + '"]');
+                    const txt = (lbl ? lbl.innerText : cb.getAttribute('aria-label') || '').toLowerCase();
+                    if (txt.includes('current')) {
+                        const allCbs = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+                        return allCbs.indexOf(cb);
+                    }
+                }
+            }
+            return -1;
+        }"""
+        try:
+            idx = await page.evaluate(_js, [co_idx])
+            if idx < 0:
+                return False
+            cb = page.locator("input[type='checkbox']").nth(idx)
+            if await cb.count() > 0 and not await cb.is_checked():
+                await cb.check()
+                return True
+        except Exception:
+            pass
+        return False
+
+    async def _fill_one_entry(
+        company: str, title: str,
+        from_month: str, from_year: str,
+        to_month: str, to_year: str,
+        is_current: bool,
+        co_idx, ti_idx, sm_idx, em_idx,
+        pre_sy: list, pre_ey: list,
+    ) -> None:
+        """Fill one employment entry's fields and log the result."""
+        filled_company = await _fill_at_idx(co_idx, company) if co_idx is not None and company else False
+        filled_title   = await _fill_at_idx(ti_idx, title)   if ti_idx is not None and title   else False
+
+        # Fill months (dropdown interactions shift DOM indices, so years are
+        # re-evaluated after all month fills).
+        filled_start_month = await _fill_dd_at_idx(sm_idx, from_month) if sm_idx is not None and from_month else False
+        filled_end_month   = (await _fill_dd_at_idx(em_idx, to_month)
+                              if em_idx is not None and to_month and not is_current else False)
+
+        # Re-evaluate year indices AFTER all dropdown interactions.
+        await page.wait_for_timeout(400)
+        post_sy = await page.evaluate(_JS_LIST_INP_POS, [r"start\s*(date\s*)?year"])
+        post_ey = await page.evaluate(_JS_LIST_INP_POS, [r"end\s*(date\s*)?year"])
+        new_sy  = _new_els(pre_sy, post_sy) if pre_sy is not None else post_sy
+        new_ey  = _new_els(pre_ey, post_ey) if pre_ey is not None else post_ey
+        _log(f"Employment year fields for {company!r}: sy={new_sy} ey={new_ey}")
+
+        filled_start_year = await _fill_at_idx(new_sy[0], from_year) if new_sy and from_year else False
+        filled_end_year   = (await _fill_at_idx(new_ey[0], to_year)
+                             if new_ey and to_year and not is_current else False)
+
+        checked_current = False
+        if is_current and co_idx is not None:
+            checked_current = await _check_current_role(co_idx)
+
+        _log(
+            f"Employment history: filled {company!r} — "
+            f"company={filled_company} title={filled_title} "
+            f"start={filled_start_month}/{filled_start_year} "
+            f"end={filled_end_month}/{filled_end_year} "
+            f"current={checked_current}"
+        )
+
+    # Process ALL work history entries.
+    # Entry [0] overwrites the pre-rendered employment block (which fill_form may
+    # have incorrectly populated with current_company).  Entries [1:] use the
+    # "Add another" + DOM-diff approach as before.
+    for entry_num, entry in enumerate(work_history):
+        company   = str(entry.get("company") or "").strip()
+        title     = str(entry.get("title") or "").strip()
         date_from = str(entry.get("from") or "").strip()
         date_to   = str(entry.get("to") or "").strip()
+        is_current = date_to.lower() == "present"
 
-        # Find and click the "Add another" button.
+        from_month, from_year = _parse_date(date_from)
+        to_month,   to_year   = _parse_date("" if is_current else date_to)
+
+        if entry_num == 0:
+            # Snapshot the initial (pre-rendered) employment block.
+            snap_co = await page.evaluate(_JS_LIST_INP_POS, [r"company|employer"])
+            snap_ti = await page.evaluate(_JS_LIST_INP_POS, [r"title|position"])
+            snap_sm = await page.evaluate(_JS_LIST_DD_POS,  [r"start\s*(date\s*)?month"])
+            snap_em = await page.evaluate(_JS_LIST_DD_POS,  [r"end\s*(date\s*)?month"])
+            snap_sy = await page.evaluate(_JS_LIST_INP_POS, [r"start\s*(date\s*)?year"])
+            snap_ey = await page.evaluate(_JS_LIST_INP_POS, [r"end\s*(date\s*)?year"])
+            _log(f"Employment first entry {company!r}: co={snap_co[:2]} ti={snap_ti[:2]} sm={snap_sm} sy={snap_sy} em={snap_em} ey={snap_ey}")
+            # The first block's fields are the lowest-indexed ones.
+            await _fill_one_entry(
+                company, title, from_month, from_year, to_month, to_year, is_current,
+                co_idx=snap_co[0] if snap_co else None,
+                ti_idx=snap_ti[0] if snap_ti else None,
+                sm_idx=snap_sm[0] if snap_sm else None,
+                em_idx=snap_em[0] if snap_em else None,
+                pre_sy=None,   # no diff for entry 0; use fresh post-month list directly
+                pre_ey=None,
+            )
+            continue
+
+        # Entries [1:] — snapshot → "Add another" → diff → fill.
+        pre_co = await page.evaluate(_JS_LIST_INP_POS, [r"company|employer"])
+        pre_ti = await page.evaluate(_JS_LIST_INP_POS, [r"title|position"])
+        pre_sm = await page.evaluate(_JS_LIST_DD_POS,  [r"start\s*(date\s*)?month"])
+        pre_sy = await page.evaluate(_JS_LIST_INP_POS, [r"start\s*(date\s*)?year"])
+        pre_em = await page.evaluate(_JS_LIST_DD_POS,  [r"end\s*(date\s*)?month"])
+        pre_ey = await page.evaluate(_JS_LIST_INP_POS, [r"end\s*(date\s*)?year"])
+        _log(f"Employment snapshot for {company!r}: co={len(pre_co)} ti={len(pre_ti)} sm={len(pre_sm)} sy={len(pre_sy)} em={len(pre_em)} ey={len(pre_ey)}")
+
         clicked = False
         for sel in add_btn_selectors:
             try:
-                btn = page.locator(sel).last
+                btn = page.locator(sel).first
                 if await btn.count() > 0 and await btn.is_visible(timeout=500):
                     await btn.click()
-                    await page.wait_for_timeout(1200)
+                    await page.wait_for_timeout(1800)
                     clicked = True
-                    _log(f"Employment history: clicked 'Add another' for {company}")
+                    _log(f"Employment history: clicked 'Add another' for {company!r}")
                     break
             except Exception:
                 continue
 
         if not clicked:
-            _log("Employment history: 'Add another' button not found — stopping after first entry")
+            _log("Employment history: 'Add another' button not found — stopping")
             break
 
-        # After clicking, new input fields appear at the bottom of the group list.
-        # Uses a single JS call to collect label/placeholder/name for recent
-        # visible inputs *and* select elements, then fills by id/name.
+        new_co = _new_els(pre_co, await page.evaluate(_JS_LIST_INP_POS, [r"company|employer"]))
+        new_ti = _new_els(pre_ti, await page.evaluate(_JS_LIST_INP_POS, [r"title|position"]))
+        new_sm = _new_els(pre_sm, await page.evaluate(_JS_LIST_DD_POS,  [r"start\s*(date\s*)?month"]))
+        new_em = _new_els(pre_em, await page.evaluate(_JS_LIST_DD_POS,  [r"end\s*(date\s*)?month"]))
+        _log(f"Employment new fields for {company!r}: co={new_co} ti={new_ti} sm={new_sm} em={new_em}")
 
-        _JS_COLLECT = """(maxBack) => {
-            function getLabel(el) {
-                if (el.id) {
-                    const lbl = document.querySelector('label[for="' + el.id + '"]');
-                    if (lbl) return lbl.innerText || '';
-                }
-                let node = el.parentElement;
-                for (let d = 0; d < 5; d++) {
-                    if (!node) break;
-                    if (node.tagName === 'LABEL') return node.innerText || '';
-                    const sib = node.previousElementSibling;
-                    if (sib && sib.tagName === 'LABEL') return sib.innerText || '';
-                    node = node.parentElement;
-                }
-                return '';
-            }
-            const inputSel = "input[type='text'], input:not([type]), " +
-                             "input[type='month'], input[type='date']";
-            const selectSel = "select";
-            function visible(el) {
-                const r = el.getBoundingClientRect();
-                if (r.width === 0 && r.height === 0) return false;
-                const s = window.getComputedStyle(el);
-                return s.display !== 'none' && s.visibility !== 'hidden';
-            }
-            const inputs  = Array.from(document.querySelectorAll(inputSel)).filter(visible);
-            const selects = Array.from(document.querySelectorAll(selectSel)).filter(visible);
-            const inputSlice  = inputs.slice(Math.max(0, inputs.length - maxBack)).reverse();
-            const selectSlice = selects.slice(Math.max(0, selects.length - maxBack)).reverse();
-            const map = el => ({
-                tag: el.tagName.toLowerCase(),
-                id: el.id || '',
-                name: el.name || '',
-                placeholder: el.placeholder || '',
-                ariaLabel: el.getAttribute('aria-label') || '',
-                labelText: getLabel(el).trim(),
-                options: el.tagName === 'SELECT'
-                    ? Array.from(el.options).map(o => o.text.trim())
-                    : [],
-            });
-            return { inputs: inputSlice.map(map), selects: selectSlice.map(map) };
-        }"""
-
-        async def _fill_last(pattern: re.Pattern, value: str) -> bool:
-            """Fill the last visible text input matching *pattern* with *value*."""
-            if not value:
-                return False
-            try:
-                data = await page.evaluate(_JS_COLLECT, 20)
-                for cand in data.get("inputs", []):
-                    hint = " ".join(filter(None, [
-                        cand.get("placeholder", ""),
-                        cand.get("ariaLabel", ""),
-                        cand.get("labelText", ""),
-                        cand.get("name", ""),
-                    ]))
-                    if not pattern.search(hint):
-                        continue
-                    cand_id   = cand.get("id", "")
-                    cand_name = cand.get("name", "")
-                    if cand_id:
-                        el = page.locator(f"#{cand_id}").first
-                    elif cand_name:
-                        el = page.locator(f"[name='{cand_name}']").last
-                    else:
-                        continue
-                    try:
-                        await el.fill(value)
-                        return True
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-            return False
-
-        async def _fill_select_last(pattern: re.Pattern, value: str) -> bool:
-            """Select an option in the last visible <select> matching *pattern*."""
-            if not value:
-                return False
-            val_lower = value.lower()
-            try:
-                data = await page.evaluate(_JS_COLLECT, 20)
-                for cand in data.get("selects", []):
-                    hint = " ".join(filter(None, [
-                        cand.get("ariaLabel", ""),
-                        cand.get("labelText", ""),
-                        cand.get("name", ""),
-                    ]))
-                    if not pattern.search(hint):
-                        continue
-                    options = cand.get("options", [])
-                    # Find best option: exact → starts-with → contains.
-                    chosen = next(
-                        (opt for opt in options if opt.lower() == val_lower), None
-                    )
-                    if not chosen:
-                        chosen = next(
-                            (opt for opt in options if opt.lower().startswith(val_lower[:3])),
-                            None,
-                        )
-                    if not chosen:
-                        chosen = next(
-                            (opt for opt in options if val_lower in opt.lower()), None
-                        )
-                    if not chosen:
-                        continue
-                    cand_id   = cand.get("id", "")
-                    cand_name = cand.get("name", "")
-                    if cand_id:
-                        el = page.locator(f"#{cand_id}").first
-                    elif cand_name:
-                        el = page.locator(f"[name='{cand_name}']").last
-                    else:
-                        continue
-                    try:
-                        await el.select_option(label=chosen)
-                        return True
-                    except Exception:
-                        try:
-                            await el.select_option(value=chosen)
-                            return True
-                        except Exception:
-                            continue
-            except Exception:
-                pass
-            return False
-
-        # Parse "Feb 2022" → month abbreviation + 4-digit year.
-        def _parse_date(date_str: str):
-            parts = date_str.split()
-            month = parts[0] if len(parts) >= 1 else ""
-            year  = parts[1] if len(parts) >= 2 else (parts[0] if len(parts) >= 1 and parts[0].isdigit() else "")
-            return month, year
-
-        from_month, from_year = _parse_date(date_from)
-        to_month,   to_year   = _parse_date(date_to if date_to != "present" else "")
-
-        _START_MONTH_LABELS = re.compile(r"start.*(month|date)|start\s*date.*month", re.I)
-        _START_YEAR_LABELS  = re.compile(r"start.*(year)|start\s*date.*year", re.I)
-        _END_MONTH_LABELS   = re.compile(r"end.*(month|date)|end\s*date.*month", re.I)
-        _END_YEAR_LABELS    = re.compile(r"end.*(year)|end\s*date.*year", re.I)
-
-        filled_company = await _fill_last(_COMPANY_LABELS, company)
-        filled_title   = await _fill_last(_TITLE_LABELS, title)
-
-        # Start date: try month SELECT first, then year text input.
-        filled_start_month = await _fill_select_last(_START_MONTH_LABELS, from_month) if from_month else False
-        filled_start_year  = await _fill_last(_START_YEAR_LABELS, from_year) if from_year else False
-        # Fallback: if no month-specific SELECT found, try the broad start pattern as SELECT.
-        if not filled_start_month:
-            filled_start_month = await _fill_select_last(_START_LABELS, from_month) if from_month else False
-        if not filled_start_year:
-            filled_start_year = await _fill_last(_START_LABELS, from_year) if from_year else False
-        filled_start = filled_start_month or filled_start_year
-
-        # End date: same pattern.
-        filled_end_month = await _fill_select_last(_END_MONTH_LABELS, to_month) if to_month else False
-        filled_end_year  = await _fill_last(_END_YEAR_LABELS, to_year) if to_year else False
-        if not filled_end_month:
-            filled_end_month = await _fill_select_last(_END_LABELS, to_month) if to_month else False
-        if not filled_end_year:
-            filled_end_year = await _fill_last(_END_LABELS, to_year) if to_year else False
-        filled_end = filled_end_month or filled_end_year
-
-        _log(
-            f"Employment history: filled {company!r} — "
-            f"company={filled_company} title={filled_title} "
-            f"start={filled_start} end={filled_end}"
+        await _fill_one_entry(
+            company, title, from_month, from_year, to_month, to_year, is_current,
+            co_idx=new_co[0] if new_co else None,
+            ti_idx=new_ti[0] if new_ti else None,
+            sm_idx=new_sm[0] if new_sm else None,
+            em_idx=new_em[0] if new_em else None,
+            pre_sy=pre_sy,
+            pre_ey=pre_ey,
         )
 
 
