@@ -75,6 +75,11 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
         s in (p.get("personal", {}).get("race") or "").lower()
         for s in ("hispanic", "latino", "latina")
     ) else "no"),
+    # Minimum age questions — derive from profile age (default yes if unset).
+    (["at least 18"], lambda p, j: "yes" if (p.get("personal", {}).get("age") or 99) >= 18 else "no"),
+    (["18 years of age"], lambda p, j: "yes" if (p.get("personal", {}).get("age") or 99) >= 18 else "no"),
+    (["18 or older"], lambda p, j: "yes" if (p.get("personal", {}).get("age") or 99) >= 18 else "no"),
+    (["over 18"], lambda p, j: "yes" if (p.get("personal", {}).get("age") or 99) >= 18 else "no"),
     # Non-compete / restrictive covenant — always "no"
     (["non-compete"], lambda p, j: "no"),
     (["noncompete"], lambda p, j: "no"),
@@ -284,6 +289,8 @@ _RACE_SYNONYMS: dict[str, list[str]] = {
     "hispanic":      ["hispanic", "latino", "latina"],
     "north african": ["north africa", "west asian", "arab", "middle east", "mena",
                       "middle eastern", "north african"],
+    "arab":          ["arab", "north africa", "north african", "middle east", "mena",
+                      "middle eastern", "west asian"],
     "other":         ["other", "multiracial", "two or more"],
 }
 _COLOUR_SYNONYMS: dict[str, list[str]] = {
@@ -489,7 +496,7 @@ async def fill_form(
                 # ARIA combobox (react-select etc.): click + pick option.
                 if field.get("role") == "combobox":
                     try:
-                        chosen = await _select_combobox_option(page, field, value, label_lower, profile=profile, job=job)
+                        chosen = await _select_combobox_option(page, field, value, label_lower, profile=profile, job=job, _log=_log)
                         if chosen:
                             actions.append({"field": label or f"anon-text-{idx}", "type": "combobox",
                                             "action": "selected", "value": chosen})
@@ -1917,11 +1924,15 @@ async def _select_combobox_option(
     label_lower: str,
     profile: dict | None = None,
     job: dict | None = None,
+    _log=None,
 ) -> str | None:
     """Click an ARIA combobox (react-select etc.) and select the best matching option.
 
     Returns the selected option text on success, or None if no match found.
     """
+    if _log is None:
+        def _log(msg: str) -> None:  # noqa: F811
+            pass
     el = await _locate_field(page, field)
     if not el:
         return None
@@ -1931,6 +1942,7 @@ async def _select_combobox_option(
 
     # Use aria-controls to scope the search to the right listbox.
     aria_controls = await el.get_attribute("aria-controls") or ""
+    _log(f"  combobox({label_lower!r}): tag={field.get('tag')!r} aria_controls={aria_controls!r}")
 
     def _query_opts(listbox_id: str) -> str:
         return """(listboxId) => {
@@ -1947,12 +1959,18 @@ async def _select_combobox_option(
     # For search/filter comboboxes (e.g. country dropdowns), options only
     # appear after typing.  Only try fill() on actual <input> elements —
     # <button>/<div> comboboxes don't support fill().
+    # Also type if initial opts exist but don't contain the target value —
+    # some dropdowns (e.g. Greenhouse school) pre-populate with generic entries
+    # like "0 - Not Applicable" but the real values require server-side filtering.
     is_input = field.get("tag", "input") == "input"
-    if not opts and is_input:
+    _exact_in_opts = any(o["text"].lower() == value.lower() for o in opts)
+    _log(f"  combobox({label_lower!r}): initial opts={[o['text'] for o in opts[:5]]} exact_match={_exact_in_opts}")
+    if is_input and (not opts or not _exact_in_opts):
         await el.fill(value)
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(1.5)  # school/location lookups can be server-side and slow
         aria_controls = await el.get_attribute("aria-controls") or ""
         opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
+        _log(f"  combobox({label_lower!r}): opts after fill={[o['text'] for o in opts[:10]]}")
 
     # Some comboboxes are div/button wrappers (is_input=False) that reveal an
     # inner <input> search field when opened (e.g. Greenhouse school selector).
@@ -1967,6 +1985,7 @@ async def _select_combobox_option(
                 "return a ? {tag: a.tagName.toLowerCase(), "
                 "itype: (a.type||'').toLowerCase(), id: a.id || ''} : {}; }"
             )
+            _log(f"  combobox({label_lower!r}): activeElement after click = {active}")
             if active.get("tag") == "input" and active.get("itype", "text") in ("text", "search", ""):
                 # Prefer a stable ID-based locator so repeated fills in the
                 # fallback loop don't drift to a different focused element.
@@ -1978,9 +1997,13 @@ async def _select_combobox_option(
                 # The inner input may not carry aria-controls; preserve the outer's value.
                 inner_aria = await el.get_attribute("aria-controls") or ""
                 aria_controls = inner_aria or aria_controls
+                _log(f"  combobox({label_lower!r}): typed {value!r}, aria_controls={aria_controls!r}")
                 opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
-        except Exception:
-            pass
+                _log(f"  combobox({label_lower!r}): opts after typing = {[o['text'] for o in opts[:10]]}")
+            else:
+                _log(f"  combobox({label_lower!r}): activeElement not an input — skipping fill")
+        except Exception as exc:
+            _log(f"  combobox({label_lower!r}): exception in not-is_input block: {exc}")
 
     # If typing the full value produced no options, retry with shorter search
     # terms so the dropdown has something to filter on.  Strategy:
@@ -2012,6 +2035,7 @@ async def _select_combobox_option(
             await asyncio.sleep(1.2)  # school/location lookups can be slow
             aria_controls = await el.get_attribute("aria-controls") or ""
             opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
+            _log(f"  combobox({label_lower!r}): fallback term={term!r} opts={[o['text'] for o in opts[:5]]}")
             if opts:
                 break
 
@@ -2027,6 +2051,24 @@ async def _select_combobox_option(
         if t == val_lower:
             await _click_option(page, opts[i])
             return opts[i]["text"]
+
+    # 1.5. MENA race priority: enforces arab > north africa > middle east > white
+    #      regardless of DOM order, before the generic synonym scan.
+    _MENA_PROFILE_RACES = {"north african", "middle eastern", "arab", "mena"}
+    if (("race" in label_lower or "ethnicity" in label_lower)
+            and val_lower in _MENA_PROFILE_RACES):
+        _mena_priority = [
+            ["arab"],
+            ["north africa", "north african"],
+            ["middle east", "mena", "middle eastern", "west asian"],
+            ["white", "caucasian", "european"],
+        ]
+        for group in _mena_priority:
+            for i, t in enumerate(opt_texts_lower):
+                opt_words = set(re.findall(r"\w+", t))
+                if any((s in t) if " " in s else (s in opt_words) for s in group):
+                    await _click_option(page, opts[i])
+                    return opts[i]["text"]
 
     # 2. Demographic synonym match using label-specific dictionaries.
     _DEMO_SYNONYMS: dict[str, tuple[str, ...]] = {
