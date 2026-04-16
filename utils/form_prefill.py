@@ -913,6 +913,20 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
         except Exception:
             pass
 
+    # Workable pre-fill: upload resume first so Workable auto-populates
+    # name, email, work history, etc. before we fill remaining fields.
+    if result.get("ats") == "workable" and fields:
+        try:
+            _log("Workable detected — uploading resume first to enable profile pre-fill…")
+            early = await try_upload_resume(fill_target, profile, job, log_fn=_log)
+            _log(f"Early resume upload: {early}")
+            if early and "uploaded" in early:
+                _log("Waiting for Workable to process resume pre-fill…")
+                await fill_target.wait_for_timeout(3000)
+                fields, fill_target = await _scan_with_frame_fallback(page)
+        except Exception as exc:
+            _log(f"Early Workable resume upload error: {exc}")
+
     cl_file_uploaded = False
     resume_uploaded = False
     if fields:

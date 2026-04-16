@@ -360,6 +360,38 @@ async def fill_form(
     # Build DOM context for anonymous fields once (expensive JS call).
     context_map = await _build_context_map(page, fields)
 
+    # Pre-scan all radio groups that will need an LLM pick and run them in
+    # parallel BEFORE the fill loop starts.  Sequential LLM calls (one per
+    # group) are the dominant cost for qualification YES/NO questions (8 groups
+    # × ~2 s each = 16 s sequential vs ~2-3 s parallel).
+    _radio_llm_cache: dict[str, str | None] = {}
+    if not dry_run:
+        from utils.form_answers import pick_option as _pick_opt_pre
+        _pre_handled: set[str] = set()
+        _pending_picks: list[tuple[str, str, list[str]]] = []  # (group_key, question, options)
+        for _pi, _pf in enumerate(fields):
+            if _pf.get("type") != "radio":
+                continue
+            _pgk = _pf.get("name") or f"radio-group-{_pi}"
+            if _pgk in _pre_handled:
+                continue
+            _pre_handled.add(_pgk)
+            _pgfs = [f for f in fields if f.get("type") == "radio"
+                     and (f.get("name") == _pf.get("name") if _pf.get("name") else f is _pf)]
+            _popts = [_effective_label(f, context_map.get(fields.index(f), "")).lower()
+                      for f in _pgfs]
+            _plbl = _effective_label(_pf, context_map.get(_pi, "")).lower()
+            if _pick_radio(_popts, _plbl, profile, job) is None:
+                _pdisp = context_map.get(_pi, _pgk) or _pgk
+                _pending_picks.append((_pgk, _pdisp, _popts))
+        if _pending_picks:
+            _llm_results = await asyncio.gather(
+                *[_pick_opt_pre(q, opts, profile, job) for _, q, opts in _pending_picks],
+                return_exceptions=True,
+            )
+            for (_pgk, _, _), _res in zip(_pending_picks, _llm_results):
+                _radio_llm_cache[_pgk] = None if isinstance(_res, Exception) else _res  # type: ignore[assignment]
+
     # Phone number: if the form has a separate country/country-code field, fill
     # only the local number in the phone field; otherwise use the full
     # international number (country code + local).
@@ -584,14 +616,17 @@ async def fill_form(
             group_display = context_map.get(idx, group_key) or group_key
 
             # LLM fallback for radio groups that no rule matched.
+            # Results are pre-fetched in parallel above (_radio_llm_cache).
             if chosen is None and not dry_run and option_labels:
                 try:
-                    from utils.form_answers import pick_option as _pick_opt
-                    _log(
-                        f'LLM picking radio for "{(group_display or label_lower)[:60]}"')
-                    chosen_text = await _pick_opt(
-                        group_display or label_lower, option_labels, profile, job
-                    )
+                    chosen_text = _radio_llm_cache.get(group_key)
+                    if chosen_text is None:
+                        # Cache miss (shouldn't normally happen) — fall back to direct call.
+                        from utils.form_answers import pick_option as _pick_opt
+                        _log(f'LLM picking radio for "{(group_display or label_lower)[:60]}"')
+                        chosen_text = await _pick_opt(
+                            group_display or label_lower, option_labels, profile, job
+                        )
                     if chosen_text:
                         chosen_lower = chosen_text.lower()
                         for i, opt in enumerate(option_labels):
