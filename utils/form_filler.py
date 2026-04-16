@@ -336,6 +336,7 @@ async def fill_form(
     job: dict,
     dry_run: bool = False,
     log_fn=None,
+    timing: bool = False,
 ) -> list[dict]:
     """Fill all detected form fields based on the profile and job.
 
@@ -348,6 +349,8 @@ async def fill_form(
                 log_fn(msg)
             except Exception:
                 pass
+
+    _tlog = timing if callable(timing) else (_log if timing else (lambda _: None))
 
     actions: list[dict] = []
     # Track uploaded file paths to prevent the same file being uploaded twice
@@ -496,7 +499,7 @@ async def fill_form(
                 # ARIA combobox (react-select etc.): click + pick option.
                 if field.get("role") == "combobox":
                     try:
-                        chosen = await _select_combobox_option(page, field, value, label_lower, profile=profile, job=job, _log=_log)
+                        chosen = await _select_combobox_option(page, field, value, label_lower, profile=profile, job=job, _log=_log, _tlog=_tlog)
                         if chosen:
                             actions.append({"field": label or f"anon-text-{idx}", "type": "combobox",
                                             "action": "selected", "value": chosen})
@@ -1917,6 +1920,23 @@ async def _click_option(page: Page, opt: dict) -> None:
         await page.locator('[role="option"]').filter(has_text=opt["text"]).first.click()
 
 
+async def _wait_for_listbox_opts(page: "Page", aria_controls: str, timeout_ms: int = 3000) -> None:
+    """Wait until the listbox has ≥1 visible option, then return.
+
+    Uses MutationObserver-style polling via wait_for_function so it exits the
+    moment results appear — no fixed sleep.  Falls back silently on timeout so
+    callers can handle empty opts normally.
+    """
+    if not aria_controls:
+        return
+    js = ("([ac]) => { const el = document.getElementById(ac); "
+          "return el ? el.querySelectorAll('[role=\"option\"]').length > 0 : false; }")
+    try:
+        await page.wait_for_function(js, arg=[aria_controls], timeout=timeout_ms)
+    except Exception:
+        pass
+
+
 async def _select_combobox_option(
     page: Page,
     field: dict,
@@ -1925,6 +1945,7 @@ async def _select_combobox_option(
     profile: dict | None = None,
     job: dict | None = None,
     _log=None,
+    _tlog=None,
 ) -> str | None:
     """Click an ARIA combobox (react-select etc.) and select the best matching option.
 
@@ -1933,16 +1954,26 @@ async def _select_combobox_option(
     if _log is None:
         def _log(msg: str) -> None:  # noqa: F811
             pass
+    if _tlog is None:
+        _tlog = lambda _: None  # noqa: E731
     el = await _locate_field(page, field)
     if not el:
         return None
 
     await el.click()
-    await asyncio.sleep(0.3)
-
     # Use aria-controls to scope the search to the right listbox.
     aria_controls = await el.get_attribute("aria-controls") or ""
     _log(f"  combobox({label_lower!r}): tag={field.get('tag')!r} aria_controls={aria_controls!r}")
+    # Wait for the listbox to appear instead of a fixed sleep.
+    _t0 = asyncio.get_event_loop().time()
+    if aria_controls:
+        try:
+            await page.wait_for_selector(f"#{aria_controls}", state="visible", timeout=1500)
+        except Exception:
+            pass
+    else:
+        await asyncio.sleep(0.2)
+    _tlog(f"  [timing] listbox-visible({label_lower!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
 
     def _query_opts(listbox_id: str) -> str:
         return """(listboxId) => {
@@ -1974,8 +2005,10 @@ async def _select_combobox_option(
     _log(f"  combobox({label_lower!r}): initial opts={[o['text'] for o in opts[:5]]} exact_match={_exact_in_opts}")
     if is_input and (not opts or _opts_are_placeholder) and not _exact_in_opts:
         await el.fill(value)
-        await asyncio.sleep(1.5)  # school/location lookups can be server-side and slow
         aria_controls = await el.get_attribute("aria-controls") or ""
+        _t0 = asyncio.get_event_loop().time()
+        await _wait_for_listbox_opts(page, aria_controls, timeout_ms=3000)
+        _tlog(f"  [timing] fill-wait({label_lower!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
         opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
         _log(f"  combobox({label_lower!r}): opts after fill={[o['text'] for o in opts[:10]]}")
 
@@ -1985,7 +2018,16 @@ async def _select_combobox_option(
     # option list (if any appeared) may not contain the target; typing triggers
     # server-side filtering.  Use document.activeElement for a stable reference.
     if not is_input:
-        await asyncio.sleep(0.4)  # wait for dropdown to fully open and focus inner input
+        # Wait for the dropdown to fully open and focus the inner input.
+        try:
+            await page.wait_for_function(
+                "() => { const a = document.activeElement; "
+                "return a && a.tagName === 'INPUT' "
+                "&& ['text','search',''].includes((a.type||'').toLowerCase()); }",
+                timeout=1500,
+            )
+        except Exception:
+            await asyncio.sleep(0.3)  # fallback if no inner input appears
         try:
             active = await page.evaluate(
                 "() => { const a = document.activeElement; "
@@ -2000,10 +2042,12 @@ async def _select_combobox_option(
                 el = page.locator(f"[id='{inner_id}']").first if inner_id else page.locator(":focus")
                 is_input = True
                 await el.fill(value)
-                await asyncio.sleep(2.0)  # school lookups are server-side and slow
                 # The inner input may not carry aria-controls; preserve the outer's value.
                 inner_aria = await el.get_attribute("aria-controls") or ""
                 aria_controls = inner_aria or aria_controls
+                _t0 = asyncio.get_event_loop().time()
+                await _wait_for_listbox_opts(page, aria_controls, timeout_ms=3500)
+                _tlog(f"  [timing] div-fill-wait({label_lower!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
                 _log(f"  combobox({label_lower!r}): typed {value!r}, aria_controls={aria_controls!r}")
                 opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
                 _log(f"  combobox({label_lower!r}): opts after typing = {[o['text'] for o in opts[:10]]}")
@@ -2039,8 +2083,10 @@ async def _select_combobox_option(
                 continue
             seen.add(term)
             await el.fill(term)
-            await asyncio.sleep(1.2)  # school/location lookups can be slow
             aria_controls = await el.get_attribute("aria-controls") or ""
+            _t0 = asyncio.get_event_loop().time()
+            await _wait_for_listbox_opts(page, aria_controls, timeout_ms=2500)
+            _tlog(f"  [timing] fallback-wait({label_lower!r}, {term!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
             opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
             _log(f"  combobox({label_lower!r}): fallback term={term!r} opts={[o['text'] for o in opts[:5]]}")
             if opts:

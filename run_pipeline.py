@@ -36,6 +36,7 @@ from connectors.nodesk import NodeskConnector
 from connectors.remote100k import Remote100kConnector
 from connectors.wearedistributed import WeAreDistributedConnector
 from connectors.flexa import FlexaConnector
+from utils.form_prefill import _TimingCollector
 from utils.dedup import is_duplicate
 from utils.application_filter import has_already_applied
 from utils.llm_analysis import analyze_job_with_ollama
@@ -387,7 +388,7 @@ def _display_jobs_by_status(target_status: str, limit: int):
         jobs = (
             session.query(Job)
             .filter(Job.status == target_status)
-            .order_by(Job.fit_score.desc(), Job.id.asc())
+            .order_by(Job.fit_score.desc(), Job.id.desc())
             .limit(max(1, limit))
             .all()
         )
@@ -438,7 +439,7 @@ def triage():
                     Job.id.notin_(seen_ids),
                     (Job.posted_date >= cutoff) | (Job.posted_date.is_(None)),
                 )
-                .order_by(Job.fit_score.desc(), Job.id.asc())
+                .order_by(Job.fit_score.desc(), Job.id.desc())
                 .first()
             )
             if not job:
@@ -723,6 +724,10 @@ def help_command():
         ("analyze", "Run LLM analysis on review jobs", "--limit N  --model <model>  --dry-run"),
         ("rescore", "Re-apply scoring rules to existing review jobs", "--status review|new"),
         ("", "", ""),
+        ("", "PERFORMANCE", ""),
+        ("perf", "Plot prefill timing trend from recorded runs", "--job Coinbase  --last 5"),
+        ("", "To record a run: $env:CC_PROFILE=\"1\"; python run_pipeline.py open-job --rank 2", ""),
+        ("", "", ""),
         ("", "SETUP & EMAIL", ""),
         ("setup-credentials", "Store email credentials in Windows Credential Manager", ""),
         ("send-test-email", "Send a test email to verify SMTP setup", ""),
@@ -852,12 +857,13 @@ def deferred(limit: int):
 
 @cli.command(name='open-job')
 @click.option('--job-id', type=int, default=None, help='Specific job ID to open (any status)')
+@click.option('--rank', type=int, default=None, help='1-based position in the ordered shortlist/queue (e.g. --rank 2 = 2nd job)')
 @click.option('--status', 'queue_status', default='shortlisted', type=click.Choice(['shortlisted', 'review']), show_default=True, help='Queue to work through when no --job-id given')
 @click.option('--profile', default='profile.yaml', help='Path to candidate profile YAML')
 @click.option('--headless', is_flag=True, default=False, help='Run headless (default: headful)')
 @click.option('--fill/--no-fill', default=True, help='Auto-fill detected form fields from profile (default: on)')
 @click.option('--dry-run', is_flag=True, default=False, help='Show what would be filled without touching the form')
-def open_job(job_id, queue_status, profile, headless, fill, dry_run):
+def open_job(job_id, rank, queue_status, profile, headless, fill, dry_run):
     """Open a shortlisted (or review) job in the browser, inspect the form, and record the outcome."""
     from playwright.async_api import async_playwright
     from utils.form_inspector import try_click_apply, scan_fields, format_field_report, extract_apply_url
@@ -872,6 +878,21 @@ def open_job(job_id, queue_status, profile, headless, fill, dry_run):
 
     session = SessionLocal()
     seen_ids: set[int] = set()
+
+    # Resolve --rank to a concrete job_id before entering the loop.
+    if rank is not None:
+        ranked_jobs = (
+            session.query(Job)
+            .filter(Job.status == queue_status, Job.url.isnot(None), Job.url != '')
+            .order_by(Job.fit_score.desc(), Job.id.desc())
+            .all()
+        )
+        if rank < 1 or rank > len(ranked_jobs):
+            click.echo(f"Rank {rank} is out of range — only {len(ranked_jobs)} {queue_status} job(s) available.")
+            session.close()
+            return
+        job_id = ranked_jobs[rank - 1].id
+
     try:
         while True:
             if job_id is not None:
@@ -888,7 +909,7 @@ def open_job(job_id, queue_status, profile, headless, fill, dry_run):
                         Job.url != '',
                         Job.id.notin_(seen_ids),
                     )
-                    .order_by(Job.fit_score.desc(), Job.id.asc())
+                    .order_by(Job.fit_score.desc(), Job.id.desc())
                     .first()
                 )
                 if not job:
@@ -1008,12 +1029,20 @@ def open_job(job_id, queue_status, profile, headless, fill, dry_run):
                     if fill and fields and ats not in MANUAL_ONLY_ATS:
                         mode = "DRY RUN — " if dry_run else ""
                         click.echo(f"\n{mode}Filling form from profile...")
-                        actions = await fill_form(active_page, fields, candidate_profile, job_dict, dry_run=dry_run)
+                        _timing = os.environ.get("CC_PROFILE") == "1"
+                        _collector = _TimingCollector(click.echo) if _timing else False
+                        actions = await fill_form(active_page, fields, candidate_profile, job_dict, dry_run=dry_run, timing=_collector)
                         click.echo(format_fill_report(actions))
                         filled = sum(1 for a in actions if a["action"] in ("filled", "checked", "selected"))
                         skipped = sum(1 for a in actions if a["action"] == "skipped")
                         errors = sum(1 for a in actions if a["action"] == "error")
                         click.echo(f"\n  filled={filled}  skipped={skipped}  errors={errors}")
+                        if _timing and isinstance(_collector, _TimingCollector):
+                            summary = _collector.summary()
+                            if summary:
+                                click.echo(summary)
+                            job_label = f"{job_dict.get('title', '')} @ {job_dict.get('company', '')}".strip(" @")
+                            _collector.save(job_label)
 
                     if fill and ats not in MANUAL_ONLY_ATS:
                         resume_status = await try_upload_resume(active_page, candidate_profile, job_dict, dry_run=dry_run)
@@ -1320,6 +1349,85 @@ def cover_letter_cmd(job_id: int, profile: str, model: str, regenerate: bool):
             click.echo(click.style(f"Generation failed: {result.get('error')}", fg="red"))
     finally:
         session.close()
+
+
+@cli.command(name='perf')
+@click.option('--job', default=None, help='Filter to runs matching this job substring (e.g. "Coinbase")')
+@click.option('--last', default=10, type=int, show_default=True, help='Number of most-recent runs to plot')
+@click.option('--save-only', is_flag=True, help='Save PNG without opening it')
+def perf_cmd(job, last, save_only):
+    """Plot prefill timing trends from logs/timing.jsonl."""
+    import webbrowser
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as ticker
+
+    log_path = os.path.join(os.path.dirname(__file__), "logs", "timing.jsonl")
+    if not os.path.exists(log_path):
+        click.echo("No timing data yet — run with CC_PROFILE=1 first.")
+        return
+
+    records = []
+    with open(log_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+
+    if job:
+        records = [r for r in records if job.lower() in r.get("job", "").lower()]
+
+    if not records:
+        click.echo(f"No records found{f' matching {job!r}' if job else ''}.")
+        return
+
+    records = records[-last:]
+    click.echo(f"Plotting {len(records)} run(s){f' for jobs matching {job!r}' if job else ''}.")
+
+    # Collect all op categories across all records
+    all_cats = sorted({cat for r in records for cat in r.get("ops", {})})
+    colors = plt.cm.tab10.colors  # type: ignore[attr-defined]
+    cat_color = {cat: colors[i % len(colors)] for i, cat in enumerate(all_cats)}
+
+    labels = []
+    for r in records:
+        ts = r.get("ts", "")[:16].replace("T", "\n")
+        j = r.get("job", "")
+        short_job = j.split("@")[0].strip()[:20] if j else ""
+        labels.append(f"{ts}\n{short_job}" if short_job else ts)
+
+    fig, ax = plt.subplots(figsize=(max(8, len(records) * 1.4), 5))
+
+    bottoms = [0.0] * len(records)
+    for cat in all_cats:
+        vals = [r.get("ops", {}).get(cat, {}).get("total_ms", 0) / 1000 for r in records]
+        ax.bar(range(len(records)), vals, bottom=bottoms, label=cat, color=cat_color[cat], width=0.6)
+        bottoms = [b + v for b, v in zip(bottoms, vals)]
+
+    # Total label above each bar
+    for i, r in enumerate(records):
+        total_s = r.get("total_ms", 0) / 1000
+        ax.text(i, bottoms[i] + 0.05, f"{total_s:.1f}s", ha="center", va="bottom", fontsize=8, fontweight="bold")
+
+    ax.set_xticks(range(len(records)))
+    ax.set_xticklabels(labels, fontsize=7)
+    ax.set_ylabel("Seconds")
+    ax.set_title(f"Prefill timing — last {len(records)} run(s){f' · {job}' if job else ''}")
+    ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1fs"))
+    ax.legend(loc="upper right", fontsize=8)
+    ax.set_ylim(0, max(bottoms) * 1.18)
+    fig.tight_layout()
+
+    out_path = os.path.join(os.path.dirname(__file__), "logs", "timing_trend.png")
+    fig.savefig(out_path, dpi=130)
+    plt.close(fig)
+    click.echo(f"Saved: {out_path}")
+    if not save_only:
+        webbrowser.open(out_path)
 
 
 @cli.command(name='ui')

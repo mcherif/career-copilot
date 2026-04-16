@@ -666,7 +666,7 @@ def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> No
     from utils.form_prefill import run_prefill_session
 
     try:
-        result = asyncio.run(run_prefill_session(job_dict, profile, cancel_event=_prefill_cancel, log_fn=_prefill_log))
+        result = asyncio.run(run_prefill_session(job_dict, profile, cancel_event=_prefill_cancel, log_fn=_prefill_log, timing=__import__("os").environ.get("CC_PROFILE") == "1"))
     except Exception as exc:
         result = {"status": "failed", "error": str(exc)}
 

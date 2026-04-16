@@ -6,7 +6,11 @@ Called from ui/app.py when the user clicks "Open & Prefill".
 from __future__ import annotations
 
 import asyncio
+import datetime
+import json
+import os
 import re
+from collections import defaultdict
 from typing import Any, Dict, Set
 from urllib.parse import urlparse, urlunparse
 
@@ -50,6 +54,73 @@ def _page_key(url: str) -> str:
         return url.split("?")[0].rstrip("/")
 
 
+class _TimingCollector:
+    """Accumulates [timing] log lines and can print an aggregate summary table.
+
+    Acts as a drop-in _tlog callable: logs the message AND records the timing.
+    Regex captures category from lines like:
+      [timing] listbox-visible('label'): 123ms
+      [timing] add-another wait: 654ms
+    """
+
+    _RE = re.compile(r"\[timing\]\s+([^(:]+)[(:].+?(\d+)ms")
+
+    def __init__(self, log_fn=None) -> None:
+        self._log = log_fn or (lambda _: None)
+        self._entries: list[tuple[str, float]] = []
+
+    def __call__(self, msg: str) -> None:
+        self._log(msg)
+        m = self._RE.search(msg)
+        if m:
+            self._entries.append((m.group(1).strip(), float(m.group(2))))
+
+    def summary(self) -> str:
+        if not self._entries:
+            return ""
+        groups: dict[str, list[float]] = defaultdict(list)
+        for cat, ms in self._entries:
+            groups[cat].append(ms)
+        col = 26
+        header = f"{'Operation':<{col}} {'N':>4} {'Total':>8} {'Avg':>7} {'Min':>7} {'Max':>7}"
+        sep = "-" * len(header)
+        rows = ["\n--- Timing Summary ---", header, sep]
+        total_all = 0.0
+        for cat in sorted(groups):
+            vals = groups[cat]
+            t = sum(vals)
+            total_all += t
+            rows.append(
+                f"{cat:<{col}} {len(vals):>4} {t:>7.0f}ms {t/len(vals):>6.0f}ms"
+                f" {min(vals):>6.0f}ms {max(vals):>6.0f}ms"
+            )
+        rows.append(sep)
+        rows.append(f"{'TOTAL':<{col}} {len(self._entries):>4} {total_all:>7.0f}ms")
+        rows.append("----------------------")
+        return "\n".join(rows)
+
+    def save(self, job_label: str = "") -> None:
+        """Append one JSONL record to logs/timing.jsonl."""
+        if not self._entries:
+            return
+        groups: dict[str, list[float]] = defaultdict(list)
+        for cat, ms in self._entries:
+            groups[cat].append(ms)
+        record = {
+            "ts": datetime.datetime.now().isoformat(timespec="seconds"),
+            "job": job_label,
+            "total_ms": round(sum(ms for _, ms in self._entries)),
+            "ops": {
+                cat: {"n": len(vals), "total_ms": round(sum(vals)), "avg_ms": round(sum(vals) / len(vals))}
+                for cat, vals in groups.items()
+            },
+        }
+        log_path = os.path.join(os.path.dirname(__file__), "..", "logs", "timing.jsonl")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+
+
 async def run_prefill_session(
     job: Dict[str, Any],
     profile: Dict[str, Any],
@@ -57,6 +128,7 @@ async def run_prefill_session(
     wait_timeout: float = 3600,
     cancel_event=None,
     log_fn=None,
+    timing: bool = False,
 ) -> Dict[str, Any]:
     """
     Open a job URL in Playwright, navigate to the application form,
@@ -134,7 +206,7 @@ async def run_prefill_session(
                     if key in filled_urls:
                         return
                     result["ats"] = tab_ats
-                    await _do_fill(new_page, profile, job, result, log_fn=_log)
+                    await _do_fill(new_page, profile, job, result, log_fn=_log, timing=timing)
                     filled_urls.add(key)
                     new_page.on("close", lambda: closed_event.set())
                 except Exception:
@@ -274,7 +346,7 @@ async def run_prefill_session(
                     else:
                         _log(f"ATS detected: {ats} — filling form…")
                         filled_urls.add(key)
-                        await _do_fill(active_page, profile, job, result, log_fn=_log)
+                        await _do_fill(active_page, profile, job, result, log_fn=_log, timing=timing)
                 else:
                     _log("No application form detected — browser is open, navigate to the form manually.")
 
@@ -290,7 +362,7 @@ async def run_prefill_session(
                 closed_event.set()
 
             watch_task = asyncio.create_task(
-                _watch_for_ats_and_fill(active_page, profile, job, result, closed_event, filled_urls, log_fn=_log)
+                _watch_for_ats_and_fill(active_page, profile, job, result, closed_event, filled_urls, log_fn=_log, timing=timing)
             )
 
             security_task = asyncio.create_task(
@@ -419,7 +491,7 @@ async def _set_iti_phone_country(page, profile: Dict[str, Any], log_fn=None) -> 
         pass
 
 
-async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -> None:
+async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None, timing: bool = False) -> None:
     """Fill repeating employment history groups using the work_history from the profile.
 
     Many ATS forms (Greenhouse, Lever) render a single employment group with an
@@ -433,6 +505,8 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
                 log_fn(msg)
             except Exception:
                 pass
+
+    _tlog = timing if callable(timing) else (_log if timing else (lambda _: None))
 
     work_history = profile.get("work_history") or []
     if not work_history:
@@ -706,12 +780,35 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
             _log(f"Employment snapshot for {company!r}: co={len(pre_co)} ti={len(pre_ti)} sm={len(pre_sm)} em={len(pre_em)}")
 
             clicked = False
+            pre_input_count = await page.evaluate(
+                "() => Array.from(document.querySelectorAll("
+                "  \"input:not([type='hidden']):not([type='submit'])"
+                "  :not([type='checkbox']):not([type='radio']):not([type='file'])\""
+                ")).filter(el => { const r = el.getBoundingClientRect();"
+                "  return r.width > 0 && r.height > 0; }).length"
+            )
             for sel in add_btn_selectors:
                 try:
                     btn = page.locator(sel).first
                     if await btn.count() > 0 and await btn.is_visible(timeout=500):
                         await btn.click()
-                        await page.wait_for_timeout(1800)
+                        # Wait for a new visible input to appear (Greenhouse pre-renders
+                        # sections as hidden DOM nodes and reveals them on click, so we
+                        # must filter by bounding rect, not just DOM presence).
+                        _t0 = asyncio.get_event_loop().time()
+                        try:
+                            await page.wait_for_function(
+                                "([n]) => Array.from(document.querySelectorAll("
+                                "  \"input:not([type='hidden']):not([type='submit'])"
+                                "  :not([type='checkbox']):not([type='radio']):not([type='file'])\""
+                                ")).filter(el => { const r = el.getBoundingClientRect();"
+                                "  return r.width > 0 && r.height > 0; }).length > n",
+                                arg=[pre_input_count],
+                                timeout=5000,
+                            )
+                        except Exception:
+                            pass
+                        _tlog(f"  [timing] add-another wait: {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
                         clicked = True
                         _log(f"Employment history: clicked 'Add another' for {company!r}")
                         break
@@ -784,7 +881,7 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
         )
 
 
-async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: Dict[str, Any], log_fn=None) -> None:
+async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: Dict[str, Any], log_fn=None, timing: bool = False) -> None:
     """Scan and fill all form fields on the current page; update result in place."""
     def _log(msg: str) -> None:
         if log_fn:
@@ -792,6 +889,10 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
                 log_fn(msg)
             except Exception:
                 pass
+
+    _timing_arg: bool | _TimingCollector = False
+    if timing:
+        _timing_arg = _TimingCollector(_log)
 
     fields, fill_target = await _scan_with_frame_fallback(page)
 
@@ -816,7 +917,7 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
     resume_uploaded = False
     if fields:
         try:
-            actions = await fill_form(fill_target, fields, profile, job, log_fn=log_fn)
+            actions = await fill_form(fill_target, fields, profile, job, log_fn=log_fn, timing=_timing_arg)
             result["filled"] += sum(
                 1 for a in actions if a["action"] in ("filled", "checked", "selected")
             )
@@ -857,7 +958,7 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
             if new_fields:
                 new_labels = [f.get("label") or f.get("id") for f in new_fields]
                 _log(f"Dynamic fields revealed: {new_labels} — filling now…")
-                actions2 = await fill_form(fill_target2, new_fields, profile, job, log_fn=log_fn)
+                actions2 = await fill_form(fill_target2, new_fields, profile, job, log_fn=log_fn, timing=_timing_arg)
                 result["filled"] += sum(
                     1 for a in actions2 if a["action"] in ("filled", "checked", "selected")
                 )
@@ -894,7 +995,7 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
 
     # Fill repeating employment history groups ("Add another" pattern).
     try:
-        await _fill_employment_history(fill_target, profile, _log)
+        await _fill_employment_history(fill_target, profile, _log, timing=_timing_arg)
     except Exception as exc:
         _log(f"Employment history fill error: {exc}")
 
@@ -916,6 +1017,12 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
 
     # All automated filling is now complete.  The browser stays open so the user
     # can review, fix anything, and click Submit — but no more automation will run.
+    if isinstance(_timing_arg, _TimingCollector):
+        summary = _timing_arg.summary()
+        if summary:
+            _log(summary)
+        job_label = f"{job.get('title', '')} @ {job.get('company', '')}".strip(" @")
+        _timing_arg.save(job_label)
     total_filled = result.get("filled", 0)
     total_skipped = result.get("skipped", 0)
     _log(
@@ -934,6 +1041,7 @@ async def _watch_for_ats_and_fill(
     filled_urls: Set[str],
     poll_interval: float = 1.5,
     log_fn=None,
+    timing: bool = False,
 ) -> None:
     """Poll page.url for same-tab navigation to ATS pages not yet filled."""
     while not closed_event.is_set():
@@ -954,7 +1062,7 @@ async def _watch_for_ats_and_fill(
                 continue
             await _wait_for_spa(page)
             result["ats"] = current_ats
-            await _do_fill(page, profile, job, result, log_fn=log_fn)
+            await _do_fill(page, profile, job, result, log_fn=log_fn, timing=timing)
             filled_urls.add(key)
         except Exception:
             pass

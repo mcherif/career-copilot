@@ -37,6 +37,7 @@ logs/
 # IDE and tool config (local only)
 .claude/
 .vscode/
+CLAUDE.md
 
 # OS generated files
 .DS_Store
