@@ -982,16 +982,17 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
     except Exception:
         pass
 
-    # Only call try_upload_resume if the resume was NOT already uploaded via
-    # fill_form (prevents double-upload on standard forms with visible file inputs).
-    if not resume_uploaded:
-        try:
-            upload_result = await try_upload_resume(fill_target, profile, job, log_fn=_log)
-            _log(f"Resume upload result: {upload_result}")
-        except Exception as exc:
-            _log(f"Resume upload error: {exc}")
-    else:
-        _log("Resume already uploaded via form fields — skipping try_upload_resume")
+    # Always call try_upload_resume so React-based upload buttons (e.g. Workable)
+    # are handled even when fill_form already set a backing file input via
+    # set_input_files() — which React ignores, leaving the UI empty.
+    # On ATSes where fill_form correctly uploaded (e.g. Greenhouse), the upload
+    # button is gone/changed after upload so try_upload_resume returns
+    # "skipped (no upload button found)" harmlessly.
+    try:
+        upload_result = await try_upload_resume(fill_target, profile, job, log_fn=_log)
+        _log(f"Resume upload result: {upload_result}")
+    except Exception as exc:
+        _log(f"Resume upload error: {exc}")
 
     # Fill repeating employment history groups ("Add another" pattern).
     try:
