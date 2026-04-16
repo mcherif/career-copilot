@@ -2003,14 +2003,42 @@ async def _select_combobox_option(
         any(p in o["text"].lower() for p in _PLACEHOLDER_PATTERNS) for o in opts
     )
     _log(f"  combobox({label_lower!r}): initial opts={[o['text'] for o in opts[:5]]} exact_match={_exact_in_opts}")
+
+    # For server-search comboboxes, typing the full value often returns nothing
+    # because the server can't match a long / comma-separated string.  Compute
+    # the best seed term upfront so we never waste a 3 s timeout on a query that
+    # is guaranteed to fail.
+    #   "Tunis, Tunisia"                   → "Tunis"       (shorter comma segment)
+    #   "University of British Columbia"   → "Columbia"    (last significant word)
+    #   "Electrical and Computer Engineering" → "Engineering" (last significant word)
+    #   "Engineering" / "Yes"              → unchanged     (short enough already)
+    # Using the last single significant word maximises the chance of the server
+    # returning ANY results on the first attempt.  The fallback loop then refines
+    # upward (1-word → 2-word → 3-word) if needed.
+    _ARTICLES = {"the", "a", "an", "of", "at", "in", "and", "or", "for", "by", "with", "&"}
+
+    def _best_seed(v: str) -> str:
+        if "," in v:
+            parts = [p.strip() for p in v.split(",")]
+            return min(parts, key=len)   # shortest segment (usually the city)
+        words = v.split()
+        if len(words) <= 2:
+            return v
+        sig = [w for w in words if w.lower() not in _ARTICLES]
+        return sig[-1] if sig else v   # last significant word
+
     if is_input and (not opts or _opts_are_placeholder) and not _exact_in_opts:
-        await el.fill(value)
+        seed = _best_seed(value)
+        _log(f"  combobox({label_lower!r}): seed={seed!r} (from value={value!r})")
+        await el.fill(seed)
         aria_controls = await el.get_attribute("aria-controls") or ""
         _t0 = asyncio.get_event_loop().time()
         await _wait_for_listbox_opts(page, aria_controls, timeout_ms=3000)
         _tlog(f"  [timing] fill-wait({label_lower!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
         opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
         _log(f"  combobox({label_lower!r}): opts after fill={[o['text'] for o in opts[:10]]}")
+    else:
+        seed = value
 
     # Some comboboxes are div/button wrappers (is_input=False) that reveal an
     # inner <input> search field when opened (e.g. Greenhouse school selector).
@@ -2041,43 +2069,40 @@ async def _select_combobox_option(
                 inner_id = active.get("id", "")
                 el = page.locator(f"[id='{inner_id}']").first if inner_id else page.locator(":focus")
                 is_input = True
-                await el.fill(value)
+                seed = _best_seed(value)
+                _log(f"  combobox({label_lower!r}): div seed={seed!r} (from value={value!r})")
+                await el.fill(seed)
                 # The inner input may not carry aria-controls; preserve the outer's value.
                 inner_aria = await el.get_attribute("aria-controls") or ""
                 aria_controls = inner_aria or aria_controls
                 _t0 = asyncio.get_event_loop().time()
                 await _wait_for_listbox_opts(page, aria_controls, timeout_ms=3500)
                 _tlog(f"  [timing] div-fill-wait({label_lower!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
-                _log(f"  combobox({label_lower!r}): typed {value!r}, aria_controls={aria_controls!r}")
+                _log(f"  combobox({label_lower!r}): typed {seed!r}, aria_controls={aria_controls!r}")
                 opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
                 _log(f"  combobox({label_lower!r}): opts after typing = {[o['text'] for o in opts[:10]]}")
             else:
+                seed = value
                 _log(f"  combobox({label_lower!r}): activeElement not an input — skipping fill")
         except Exception as exc:
+            seed = value
             _log(f"  combobox({label_lower!r}): exception in not-is_input block: {exc}")
 
-    # If typing the full value produced no options, retry with shorter search
-    # terms so the dropdown has something to filter on.  Strategy:
-    #   - Comma-separated ("Tunis, Tunisia"): try country part, then city.
-    #   - Space-separated multi-word ("The University of British Columbia"):
-    #     skip leading articles, then try from the back (most distinctive
-    #     words first): "British Columbia", "Columbia", each significant word.
-    _ARTICLES = {"the", "a", "an", "of", "at", "in"}
+    # If the seed produced no options, retry with progressively longer terms
+    # (1-word → 2-word → 3-word), then individual significant words.
+    # Pre-populate seen with the seed so we don't waste a round retrying it.
     if not opts and is_input and ("," in value or " " in value):
         fallback_terms: list[str] = []
         if "," in value:
-            fallback_terms.append(value.split(",")[-1].strip())   # country
-            fallback_terms.append(value.split(",")[0].strip())    # city
+            fallback_terms.append(value.split(",")[0].strip())
+            fallback_terms.append(value.split(",")[-1].strip())
         else:
             words = value.split()
-            # Strip leading articles to get the meaningful part.
             sig = [w for w in words if w.lower() not in _ARTICLES]
-            # Try progressively shorter suffixes (e.g. "British Columbia", "Columbia")
-            for n in range(min(3, len(sig)), 0, -1):
+            for n in range(1, min(3, len(sig)) + 1):
                 fallback_terms.append(" ".join(sig[-n:]))
-            # Also try each significant word individually as a last resort.
             fallback_terms.extend(sig)
-        seen: set[str] = set()
+        seen: set[str] = {seed.lower()}   # don't retry what we already tried
         for term in fallback_terms:
             if not term or term in seen or term.lower() == value.lower():
                 continue
