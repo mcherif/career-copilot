@@ -915,15 +915,19 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
 
     # Workable pre-fill: upload resume first so Workable auto-populates
     # name, email, work history, etc. before we fill remaining fields.
+    # We intentionally do NOT re-scan after upload — re-scanning returns
+    # Workable's resume-parser UI instead of the application form fields,
+    # causing radio/button groups to disappear from the fill pass.
+    _early_resume_uploaded = False
     if result.get("ats") == "workable" and fields:
         try:
             _log("Workable detected — uploading resume first to enable profile pre-fill…")
             early = await try_upload_resume(fill_target, profile, job, log_fn=_log)
             _log(f"Early resume upload: {early}")
             if early and "uploaded" in early:
+                _early_resume_uploaded = True
                 _log("Waiting for Workable to process resume pre-fill…")
                 await fill_target.wait_for_timeout(3000)
-                fields, fill_target = await _scan_with_frame_fallback(page)
         except Exception as exc:
             _log(f"Early Workable resume upload error: {exc}")
 
@@ -996,17 +1000,16 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
     except Exception:
         pass
 
-    # Always call try_upload_resume so React-based upload buttons (e.g. Workable)
-    # are handled even when fill_form already set a backing file input via
-    # set_input_files() — which React ignores, leaving the UI empty.
-    # On ATSes where fill_form correctly uploaded (e.g. Greenhouse), the upload
-    # button is gone/changed after upload so try_upload_resume returns
-    # "skipped (no upload button found)" harmlessly.
-    try:
-        upload_result = await try_upload_resume(fill_target, profile, job, log_fn=_log)
-        _log(f"Resume upload result: {upload_result}")
-    except Exception as exc:
-        _log(f"Resume upload error: {exc}")
+    # Call try_upload_resume for React-based upload buttons (e.g. Workable) that
+    # ignore set_input_files().  Skip if early Workable upload already succeeded
+    # to avoid uploading twice.  On other ATSes (e.g. Greenhouse) where fill_form
+    # correctly uploaded, the button is gone so this returns harmlessly.
+    if not _early_resume_uploaded:
+        try:
+            upload_result = await try_upload_resume(fill_target, profile, job, log_fn=_log)
+            _log(f"Resume upload result: {upload_result}")
+        except Exception as exc:
+            _log(f"Resume upload error: {exc}")
 
     # Fill repeating employment history groups ("Add another" pattern).
     try:
