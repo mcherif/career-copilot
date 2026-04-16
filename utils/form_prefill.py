@@ -661,52 +661,23 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
             pass
         return False
 
-    async def _fill_one_entry(
-        company: str, title: str,
-        from_month: str, from_year: str,
-        to_month: str, to_year: str,
-        is_current: bool,
-        co_idx, ti_idx, sm_idx, em_idx,
-        pre_sy: list, pre_ey: list,
-    ) -> None:
-        """Fill one employment entry's fields and log the result."""
-        filled_company = await _fill_at_idx(co_idx, company) if co_idx is not None and company else False
-        filled_title   = await _fill_at_idx(ti_idx, title)   if ti_idx is not None and title   else False
+    # -------------------------------------------------------------------------
+    # Two-phase fill:
+    #   Phase 1 — company, title, months for every entry (serial, entry by entry)
+    #   Phase 2 — ONE wait + TWO JS calls to get all year positions, then fill
+    #             years for all entries in a single pass.
+    #
+    # This avoids the 400 ms DOM-settle wait that was needed after EACH entry's
+    # month dropdowns (6 entries × 400 ms = 2.4 s saved).  Year positions are
+    # stable once all month dropdowns have closed, and all_sy[i] / all_ey[i]
+    # reliably maps to entry i by DOM order.
+    # -------------------------------------------------------------------------
 
-        # Fill months (dropdown interactions shift DOM indices, so years are
-        # re-evaluated after all month fills).
-        filled_start_month = await _fill_dd_at_idx(sm_idx, from_month) if sm_idx is not None and from_month else False
-        filled_end_month   = (await _fill_dd_at_idx(em_idx, to_month)
-                              if em_idx is not None and to_month and not is_current else False)
+    # Records for Phase 2: (company, from_year, to_year, is_current, co_idx,
+    #                        filled_company, filled_title, filled_sm, filled_em)
+    _pending: list[dict] = []
 
-        # Re-evaluate year indices AFTER all dropdown interactions.
-        await page.wait_for_timeout(400)
-        post_sy = await page.evaluate(_JS_LIST_INP_POS, [r"start\s*(date\s*)?year"])
-        post_ey = await page.evaluate(_JS_LIST_INP_POS, [r"end\s*(date\s*)?year"])
-        new_sy  = _new_els(pre_sy, post_sy) if pre_sy is not None else post_sy
-        new_ey  = _new_els(pre_ey, post_ey) if pre_ey is not None else post_ey
-        _log(f"Employment year fields for {company!r}: sy={new_sy} ey={new_ey}")
-
-        filled_start_year = await _fill_at_idx(new_sy[0], from_year) if new_sy and from_year else False
-        filled_end_year   = (await _fill_at_idx(new_ey[0], to_year)
-                             if new_ey and to_year and not is_current else False)
-
-        checked_current = False
-        if is_current and co_idx is not None:
-            checked_current = await _check_current_role(co_idx)
-
-        _log(
-            f"Employment history: filled {company!r} — "
-            f"company={filled_company} title={filled_title} "
-            f"start={filled_start_month}/{filled_start_year} "
-            f"end={filled_end_month}/{filled_end_year} "
-            f"current={checked_current}"
-        )
-
-    # Process ALL work history entries.
-    # Entry [0] overwrites the pre-rendered employment block (which fill_form may
-    # have incorrectly populated with current_company).  Entries [1:] use the
-    # "Add another" + DOM-diff approach as before.
+    # Phase 1 — company / title / months.
     for entry_num, entry in enumerate(work_history):
         company   = str(entry.get("company") or "").strip()
         title     = str(entry.get("title") or "").strip()
@@ -718,66 +689,92 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
         to_month,   to_year   = _parse_date("" if is_current else date_to)
 
         if entry_num == 0:
-            # Snapshot the initial (pre-rendered) employment block.
             snap_co = await page.evaluate(_JS_LIST_INP_POS, [r"company|employer"])
             snap_ti = await page.evaluate(_JS_LIST_INP_POS, [r"title|position"])
             snap_sm = await page.evaluate(_JS_LIST_DD_POS,  [r"start\s*(date\s*)?month"])
             snap_em = await page.evaluate(_JS_LIST_DD_POS,  [r"end\s*(date\s*)?month"])
-            snap_sy = await page.evaluate(_JS_LIST_INP_POS, [r"start\s*(date\s*)?year"])
-            snap_ey = await page.evaluate(_JS_LIST_INP_POS, [r"end\s*(date\s*)?year"])
-            _log(f"Employment first entry {company!r}: co={snap_co[:2]} ti={snap_ti[:2]} sm={snap_sm} sy={snap_sy} em={snap_em} ey={snap_ey}")
-            # The first block's fields are the lowest-indexed ones.
-            await _fill_one_entry(
-                company, title, from_month, from_year, to_month, to_year, is_current,
-                co_idx=snap_co[0] if snap_co else None,
-                ti_idx=snap_ti[0] if snap_ti else None,
-                sm_idx=snap_sm[0] if snap_sm else None,
-                em_idx=snap_em[0] if snap_em else None,
-                pre_sy=None,   # no diff for entry 0; use fresh post-month list directly
-                pre_ey=None,
-            )
-            continue
+            _log(f"Employment first entry {company!r}: co={snap_co[:2]} ti={snap_ti[:2]} sm={snap_sm} em={snap_em}")
+            co_idx = snap_co[0] if snap_co else None
+            ti_idx = snap_ti[0] if snap_ti else None
+            sm_idx = snap_sm[0] if snap_sm else None
+            em_idx = snap_em[0] if snap_em else None
+        else:
+            pre_co = await page.evaluate(_JS_LIST_INP_POS, [r"company|employer"])
+            pre_ti = await page.evaluate(_JS_LIST_INP_POS, [r"title|position"])
+            pre_sm = await page.evaluate(_JS_LIST_DD_POS,  [r"start\s*(date\s*)?month"])
+            pre_em = await page.evaluate(_JS_LIST_DD_POS,  [r"end\s*(date\s*)?month"])
+            _log(f"Employment snapshot for {company!r}: co={len(pre_co)} ti={len(pre_ti)} sm={len(pre_sm)} em={len(pre_em)}")
 
-        # Entries [1:] — snapshot → "Add another" → diff → fill.
-        pre_co = await page.evaluate(_JS_LIST_INP_POS, [r"company|employer"])
-        pre_ti = await page.evaluate(_JS_LIST_INP_POS, [r"title|position"])
-        pre_sm = await page.evaluate(_JS_LIST_DD_POS,  [r"start\s*(date\s*)?month"])
-        pre_sy = await page.evaluate(_JS_LIST_INP_POS, [r"start\s*(date\s*)?year"])
-        pre_em = await page.evaluate(_JS_LIST_DD_POS,  [r"end\s*(date\s*)?month"])
-        pre_ey = await page.evaluate(_JS_LIST_INP_POS, [r"end\s*(date\s*)?year"])
-        _log(f"Employment snapshot for {company!r}: co={len(pre_co)} ti={len(pre_ti)} sm={len(pre_sm)} sy={len(pre_sy)} em={len(pre_em)} ey={len(pre_ey)}")
+            clicked = False
+            for sel in add_btn_selectors:
+                try:
+                    btn = page.locator(sel).first
+                    if await btn.count() > 0 and await btn.is_visible(timeout=500):
+                        await btn.click()
+                        await page.wait_for_timeout(1800)
+                        clicked = True
+                        _log(f"Employment history: clicked 'Add another' for {company!r}")
+                        break
+                except Exception:
+                    continue
 
-        clicked = False
-        for sel in add_btn_selectors:
-            try:
-                btn = page.locator(sel).first
-                if await btn.count() > 0 and await btn.is_visible(timeout=500):
-                    await btn.click()
-                    await page.wait_for_timeout(1800)
-                    clicked = True
-                    _log(f"Employment history: clicked 'Add another' for {company!r}")
-                    break
-            except Exception:
-                continue
+            if not clicked:
+                _log("Employment history: 'Add another' button not found — stopping")
+                break
 
-        if not clicked:
-            _log("Employment history: 'Add another' button not found — stopping")
-            break
+            new_co = _new_els(pre_co, await page.evaluate(_JS_LIST_INP_POS, [r"company|employer"]))
+            new_ti = _new_els(pre_ti, await page.evaluate(_JS_LIST_INP_POS, [r"title|position"]))
+            new_sm = _new_els(pre_sm, await page.evaluate(_JS_LIST_DD_POS,  [r"start\s*(date\s*)?month"]))
+            new_em = _new_els(pre_em, await page.evaluate(_JS_LIST_DD_POS,  [r"end\s*(date\s*)?month"]))
+            _log(f"Employment new fields for {company!r}: co={new_co} ti={new_ti} sm={new_sm} em={new_em}")
+            co_idx = new_co[0] if new_co else None
+            ti_idx = new_ti[0] if new_ti else None
+            sm_idx = new_sm[0] if new_sm else None
+            em_idx = new_em[0] if new_em else None
 
-        new_co = _new_els(pre_co, await page.evaluate(_JS_LIST_INP_POS, [r"company|employer"]))
-        new_ti = _new_els(pre_ti, await page.evaluate(_JS_LIST_INP_POS, [r"title|position"]))
-        new_sm = _new_els(pre_sm, await page.evaluate(_JS_LIST_DD_POS,  [r"start\s*(date\s*)?month"]))
-        new_em = _new_els(pre_em, await page.evaluate(_JS_LIST_DD_POS,  [r"end\s*(date\s*)?month"]))
-        _log(f"Employment new fields for {company!r}: co={new_co} ti={new_ti} sm={new_sm} em={new_em}")
+        filled_company = await _fill_at_idx(co_idx, company) if co_idx is not None and company else False
+        filled_title   = await _fill_at_idx(ti_idx, title)   if ti_idx is not None and title   else False
+        filled_sm = await _fill_dd_at_idx(sm_idx, from_month) if sm_idx is not None and from_month else False
+        filled_em = (await _fill_dd_at_idx(em_idx, to_month)
+                     if em_idx is not None and to_month and not is_current else False)
+        _pending.append({
+            "company": company, "co_idx": co_idx,
+            "from_year": from_year, "to_year": to_year, "is_current": is_current,
+            "filled_company": filled_company, "filled_title": filled_title,
+            "filled_sm": filled_sm, "filled_em": filled_em,
+        })
 
-        await _fill_one_entry(
-            company, title, from_month, from_year, to_month, to_year, is_current,
-            co_idx=new_co[0] if new_co else None,
-            ti_idx=new_ti[0] if new_ti else None,
-            sm_idx=new_sm[0] if new_sm else None,
-            em_idx=new_em[0] if new_em else None,
-            pre_sy=pre_sy,
-            pre_ey=pre_ey,
+    # Phase 2 — batch year evaluation and fill.
+    # One DOM-settle wait + two JS calls covers all entries.
+    await page.wait_for_timeout(400)
+    all_sy = await page.evaluate(_JS_LIST_INP_POS, [r"start\s*(date\s*)?year"])
+    all_ey = await page.evaluate(_JS_LIST_INP_POS, [r"end\s*(date\s*)?year"])
+
+    for i, pend in enumerate(_pending):
+        company    = pend["company"]
+        from_year  = pend["from_year"]
+        to_year    = pend["to_year"]
+        is_current = pend["is_current"]
+        co_idx     = pend["co_idx"]
+
+        sy_idx = all_sy[i] if i < len(all_sy) else None
+        ey_idx = all_ey[i] if i < len(all_ey) else None
+        _log(f"Employment year fields for {company!r}: sy={sy_idx} ey={ey_idx}")
+
+        filled_sy = await _fill_at_idx(sy_idx, from_year) if sy_idx is not None and from_year else False
+        filled_ey = (await _fill_at_idx(ey_idx, to_year)
+                     if ey_idx is not None and to_year and not is_current else False)
+
+        checked_current = False
+        if is_current and co_idx is not None:
+            checked_current = await _check_current_role(co_idx)
+
+        _log(
+            f"Employment history: filled {company!r} — "
+            f"company={pend['filled_company']} title={pend['filled_title']} "
+            f"start={pend['filled_sm']}/{filled_sy} "
+            f"end={pend['filled_em']}/{filled_ey} "
+            f"current={checked_current}"
         )
 
 
