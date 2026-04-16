@@ -1964,8 +1964,15 @@ async def _select_combobox_option(
     # like "0 - Not Applicable" but the real values require server-side filtering.
     is_input = field.get("tag", "input") == "input"
     _exact_in_opts = any(o["text"].lower() == value.lower() for o in opts)
+    # Placeholder opts (e.g. "0 - Not Applicable") mean the real options require
+    # server-side filtering — fill to trigger it.  Real option lists (race, gender,
+    # "how did you hear") should not be filled; synonym/substring matching handles them.
+    _PLACEHOLDER_PATTERNS = {"not applicable", "please select", "select one", "n/a"}
+    _opts_are_placeholder = bool(opts) and any(
+        any(p in o["text"].lower() for p in _PLACEHOLDER_PATTERNS) for o in opts
+    )
     _log(f"  combobox({label_lower!r}): initial opts={[o['text'] for o in opts[:5]]} exact_match={_exact_in_opts}")
-    if is_input and (not opts or not _exact_in_opts):
+    if is_input and (not opts or _opts_are_placeholder) and not _exact_in_opts:
         await el.fill(value)
         await asyncio.sleep(1.5)  # school/location lookups can be server-side and slow
         aria_controls = await el.get_attribute("aria-controls") or ""

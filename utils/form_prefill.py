@@ -755,15 +755,21 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
         from_year  = pend["from_year"]
         to_year    = pend["to_year"]
         is_current = pend["is_current"]
-        co_idx     = pend["co_idx"]
 
         sy_idx = all_sy[i] if i < len(all_sy) else None
         ey_idx = all_ey[i] if i < len(all_ey) else None
         _log(f"Employment year fields for {company!r}: sy={sy_idx} ey={ey_idx}")
 
-        filled_sy = await _fill_at_idx(sy_idx, from_year) if sy_idx is not None and from_year else False
-        filled_ey = (await _fill_at_idx(ey_idx, to_year)
-                     if ey_idx is not None and to_year and not is_current else False)
+        pend["filled_sy"] = await _fill_at_idx(sy_idx, from_year) if sy_idx is not None and from_year else False
+        pend["filled_ey"] = (await _fill_at_idx(ey_idx, to_year)
+                             if ey_idx is not None and to_year and not is_current else False)
+
+    # Final pass: check "current role" AFTER all year fills so that DOM mutations
+    # from hiding end-date fields don't invalidate the stale all_sy/all_ey snapshot.
+    for pend in _pending:
+        company    = pend["company"]
+        is_current = pend["is_current"]
+        co_idx     = pend["co_idx"]
 
         checked_current = False
         if is_current and co_idx is not None:
@@ -772,8 +778,8 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None) -
         _log(
             f"Employment history: filled {company!r} — "
             f"company={pend['filled_company']} title={pend['filled_title']} "
-            f"start={pend['filled_sm']}/{filled_sy} "
-            f"end={pend['filled_em']}/{filled_ey} "
+            f"start={pend['filled_sm']}/{pend['filled_sy']} "
+            f"end={pend['filled_em']}/{pend['filled_ey']} "
             f"current={checked_current}"
         )
 
