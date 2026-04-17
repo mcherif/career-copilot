@@ -95,6 +95,7 @@ def _call_ollama(question: str, job: Dict[str, Any], profile: Dict[str, Any]) ->
         ],
         "stream": False,
         "keep_alive": "10m",
+        "think": False,
     }
     try:
         r = requests.post(config.OLLAMA_URL, json=payload, timeout=config.LLM_TIMEOUT)
@@ -146,6 +147,7 @@ def _call_ollama_pick(
         ],
         "stream": False,
         "keep_alive": "10m",
+        "think": False,
     }
     try:
         import re as _re
