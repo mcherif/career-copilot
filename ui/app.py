@@ -662,6 +662,15 @@ def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> No
         preview = cl_text[:120].replace("\n", " ")
         _prefill_log(f"Cover letter ready: {preview}…")
 
+    # Save cover letter PDF now so the user always has a file to upload manually,
+    # even if the automated upload fails or the ATS field isn't detected.
+    if job_dict.get("cover_letter"):
+        try:
+            from utils.form_filler import _resolve_cover_letter_path
+            _resolve_cover_letter_path({}, job_dict, log_fn=_prefill_log)
+        except Exception as exc:
+            _prefill_log(f"Cover letter PDF save error: {exc}")
+
     _prefill_log("Launching browser…")
     from utils.form_prefill import run_prefill_session
 
