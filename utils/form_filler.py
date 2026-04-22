@@ -1973,7 +1973,8 @@ def _resolve_cover_letter_path(profile: dict, job: dict, log_fn=None) -> str:
             else:
                 print(msg, flush=True)
         except Exception as _copy_exc:
-            print(f"[cover_letter] could not save copy: {_copy_exc}", flush=True)
+            print(
+                f"[cover_letter] could not save copy: {_copy_exc}", flush=True)
         return path
     except Exception as _exc:
         print(f"[cover_letter] PDF generation error: {_exc}", flush=True)
