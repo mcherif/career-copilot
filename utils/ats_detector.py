@@ -12,6 +12,7 @@ ATS_PATTERNS = {
     "comeet": ["comeet.com", "app.comeet.co"],
     "ateam": ["a.team", "onboarding.a.team"],
     "personio": ["personio.com"],
+    "rippling": ["ats.rippling.com"],
 }
 
 # ATS platforms that use custom React/SPA forms incompatible with scan_fields.

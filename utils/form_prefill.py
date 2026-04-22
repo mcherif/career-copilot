@@ -438,6 +438,108 @@ _ITI_COUNTRY_MAP: dict[str, str] = {
 }
 
 
+async def _fix_split_phone_country(page, profile: Dict[str, Any], log_fn=None) -> None:
+    """Fix split phone inputs where a country-code button sits beside a number field.
+
+    Rippling and similar ATSes render phone as [+1 US ▼] [number input].
+    scan_fields only captures the number input, so the pipeline fills the full
+    international number (e.g. "216 93117117") into a number-only field.
+    This function: (1) re-fills the number field with just the local number,
+    (2) clicks the country code button and selects the correct country.
+    """
+    import re as _re
+
+    def _log(msg: str) -> None:
+        if log_fn:
+            try:
+                log_fn(msg)
+            except Exception:
+                pass
+
+    personal = profile.get("personal") or {}
+    bare = str(personal.get("phone") or "").strip()
+    country = str(personal.get("phone_country") or "").strip()
+    cc = str(personal.get("phone_country_code") or "").strip()
+    if not bare or not country:
+        return
+
+    # Find buttons whose visible text starts with "+" followed by digits (country code picker).
+    try:
+        all_btns = page.locator("button")
+        btn_count = await all_btns.count()
+        for i in range(btn_count):
+            btn = all_btns.nth(i)
+            if not await btn.is_visible(timeout=200):
+                continue
+            btn_text = (await btn.inner_text()).strip()
+            if not _re.match(r"^\+\d", btn_text):
+                continue
+
+            # Found a split phone country-code button. Locate the adjacent number input.
+            phone_id = await btn.evaluate("""el => {
+                const parent = el.parentElement;
+                if (!parent) return '';
+                const inp = parent.querySelector('input[type="tel"], input[type="text"]');
+                if (inp) return inp.id || '';
+                const next = parent.nextElementSibling;
+                if (next) {
+                    const inp2 = next.querySelector('input[type="tel"], input[type="text"]');
+                    if (inp2) return inp2.id || '';
+                    if (next.tagName === 'INPUT') return next.id || '';
+                }
+                return '';
+            }""")
+            if not phone_id:
+                continue
+
+            phone_loc = page.locator(f"#{phone_id}").first
+            if await phone_loc.count() == 0:
+                continue
+
+            current_val = (await phone_loc.input_value()).strip()
+            intl = f"{cc} {bare}".strip() if cc else bare
+            if current_val not in (intl, bare):
+                continue  # not a field we filled — skip
+
+            # Re-fill with bare number if currently has the international format.
+            if current_val != bare:
+                await phone_loc.fill(bare, force=True)
+                _log(f"Split phone: re-filled number input with bare number '{bare}'")
+
+            # If the button already shows the right country code (+216), done.
+            if cc and f"+{cc}" in btn_text:
+                _log(f"Split phone: country code already correct ({btn_text})")
+                return
+
+            # Click the country code button to open the picker dropdown.
+            await btn.click()
+            await asyncio.sleep(0.4)
+
+            # Many dropdown implementations include a search input — use it.
+            search_inp = page.locator(
+                "input[placeholder*='Search'], input[placeholder*='search'], "
+                "input[aria-label*='Search'], input[aria-label*='search']"
+            ).last
+            if await search_inp.count() > 0 and await search_inp.is_visible(timeout=500):
+                await search_inp.fill(country)
+                await asyncio.sleep(0.4)
+
+            # Click the matching country entry.
+            country_item = page.locator(
+                f"[data-dial-code='{cc}'], li:has-text('{country}'), "
+                f"[role='option']:has-text('{country}')"
+            ).first
+            if await country_item.count() > 0 and await country_item.is_visible(timeout=1000):
+                await country_item.click()
+                _log(f"Split phone: country changed to {country} (+{cc})")
+            else:
+                await page.keyboard.press("Escape")
+                _log(f"Split phone: could not find '{country}' in dropdown — fill manually")
+            return
+    except Exception as exc:
+        _log(f"Split phone fix error: {exc}")
+
+
 async def _set_iti_phone_country(page, profile: Dict[str, Any], log_fn=None) -> None:
     """Set the intl-tel-input phone country on any phone fields.
 
@@ -1000,6 +1102,13 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
     except Exception:
         pass
 
+    # Fix split phone inputs (e.g. Rippling: [+1 US ▼] [number]).
+    # Corrects the number field to bare digits and changes the country code dropdown.
+    try:
+        await _fix_split_phone_country(fill_target, profile, log_fn=_log)
+    except Exception:
+        pass
+
     # Call try_upload_resume for React-based upload buttons (e.g. Workable) that
     # ignore set_input_files().  Skip if early Workable upload already succeeded
     # to avoid uploading twice.  On other ATSes (e.g. Greenhouse) where fill_form
@@ -1344,6 +1453,33 @@ async def _ensure_cover_letter_uploaded(page, job: Dict[str, Any], log_fn=None) 
 
     _log("Cover letter not yet uploaded — retrying now…")
     success = False
+    _fc_page = getattr(page, "page", page)  # Frame → parent Page for file chooser
+
+    # Strategy 1: file chooser via clicking the "Drop or select" / upload area
+    # (works for React-based file inputs like Rippling that ignore set_input_files).
+    cl_upload_selectors = [
+        "label:has-text('Cover letter')",
+        "[aria-label*='Cover letter']",
+        "[aria-label*='cover letter']",
+        "div:has-text('Drop or select'):near(h2:has-text('Cover letter'))",
+        "div:has-text('Drop or select'):near(label:has-text('Cover letter'))",
+        "div:has-text('Drop or select'):near(p:has-text('Cover letter'))",
+    ]
+    for sel in cl_upload_selectors:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() == 0 or not await loc.is_visible(timeout=300):
+                continue
+            async with _fc_page.expect_file_chooser(timeout=4000) as fc_info:
+                await loc.click()
+            fc = await fc_info.value
+            await fc.set_files(file_path)
+            _log("Cover letter uploaded via file chooser ✓")
+            return
+        except Exception:
+            continue
+
+    # Strategy 2: set_input_files on the hidden file input (non-React ATSes).
     for field_info in cl_inputs:
         if field_info.get("hasFile"):
             continue
@@ -1364,7 +1500,6 @@ async def _ensure_cover_letter_uploaded(page, job: Dict[str, Any], log_fn=None) 
                         pass
                     success = True
             else:
-                # No id — target all cover-letter file inputs by position
                 await page.locator("input[type='file']").first.set_input_files(file_path)
                 success = True
         except Exception as exc:
