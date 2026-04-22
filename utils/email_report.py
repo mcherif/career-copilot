@@ -27,13 +27,26 @@ def _build_html(new_jobs: List[Dict[str, Any]], counts: Dict[str, int]) -> str:
     for job in new_jobs:
         status = job["status"]
         badge_color = "#2e7d32" if status == "shortlisted" else "#e65100"
+        job_url = job.get("url") or ""
+        job_id = job.get("id") or ""
+        title_cell = (
+            f'<a href="{job_url}" style="color:#1565c0;text-decoration:none;">{job["title"]}</a>'
+            if job_url else job["title"]
+        )
+        apply_cell = (
+            f'<a href="http://localhost:7860?job_id={job_id}" '
+            f'style="font-size:0.8em;color:#fff;background:#1565c0;padding:2px 7px;'
+            f'border-radius:3px;text-decoration:none;">Apply</a>'
+            if job_id else ""
+        )
         new_rows += (
             f'<tr>'
             f'<td><span style="background:{badge_color};color:#fff;padding:2px 6px;border-radius:3px;font-size:0.85em;">{status}</span></td>'
-            f'<td>{job["title"]}</td>'
+            f'<td>{title_cell}</td>'
             f'<td>{job["company"]}</td>'
             f'<td style="text-align:center;">{job["fit_score"] or "-"}</td>'
             f'<td>{job.get("source","")}</td>'
+            f'<td>{apply_cell}</td>'
             f'</tr>'
         )
 
@@ -49,6 +62,7 @@ def _build_html(new_jobs: List[Dict[str, Any]], counts: Dict[str, int]) -> str:
               <th style="padding:6px 8px;text-align:left;">Company</th>
               <th style="padding:6px 8px;text-align:center;">Score</th>
               <th style="padding:6px 8px;text-align:left;">Source</th>
+              <th style="padding:6px 8px;text-align:left;"></th>
             </tr>
           </thead>
           <tbody>{new_rows}</tbody>

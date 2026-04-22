@@ -516,8 +516,27 @@ let pipelinePoller = null;
 // ── Boot ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   loadStats();
-  loadJobs('review');
+  // Deep-link from email: ?job_id=N auto-selects that job.
+  const _qs = new URLSearchParams(window.location.search);
+  const _deepJobId = _qs.get('job_id') ? parseInt(_qs.get('job_id'), 10) : null;
+  if (_deepJobId) {
+    _openDeepLinkedJob(_deepJobId);
+  } else {
+    loadJobs('review');
+  }
 });
+
+async function _openDeepLinkedJob(jobId) {
+  try {
+    const job = await api(`/api/jobs/${jobId}`);
+    // Load the tab matching the job's status, then select it.
+    await loadJobs(job.status || 'shortlisted');
+    const i = jobs.findIndex(j => j.id === jobId);
+    if (i >= 0) { idx = i; renderCard(idx); }
+  } catch(e) {
+    loadJobs('review');
+  }
+}
 
 // ── Stats ──────────────────────────────────────────────────────────────────
 async function loadStats() {
