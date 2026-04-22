@@ -1446,7 +1446,7 @@ async def _ensure_cover_letter_uploaded(page, job: Dict[str, Any], log_fn=None) 
 
     # Generate the PDF and upload to every unfilled CL input.
     from utils.form_filler import _resolve_cover_letter_path
-    file_path = _resolve_cover_letter_path({}, job)
+    file_path = _resolve_cover_letter_path({}, job, log_fn=_log)
     if not file_path:
         _log("⚠ Cover letter field found but PDF generation failed — fill manually")
         return

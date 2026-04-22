@@ -32,10 +32,14 @@ from playwright.async_api import Page
 _TEXT_RULES: list[tuple[list[str], Any]] = [
     # Company / employer name rules MUST come before the generic "name" rule
     # so "company name" label hits the right rule first.
-    (["current company"], lambda p, j: p.get("personal", {}).get("current_company", "")),
-    (["current employer"], lambda p, j: p.get("personal", {}).get("current_company", "")),
-    (["company name"], lambda p, j: p.get("personal", {}).get("current_company", "")),
-    (["organization"], lambda p, j: p.get("personal", {}).get("current_company", "")),
+    (["current company"], lambda p, j: p.get(
+        "personal", {}).get("current_company", "")),
+    (["current employer"], lambda p, j: p.get(
+        "personal", {}).get("current_company", "")),
+    (["company name"], lambda p, j: p.get(
+        "personal", {}).get("current_company", "")),
+    (["organization"], lambda p, j: p.get(
+        "personal", {}).get("current_company", "")),
     # First/last name rules must come before the generic "name" rule.
     (["first name"], lambda p, j: (
         p.get("personal", {}).get("name", "") or "").split()[0]),
@@ -76,10 +80,14 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
         for s in ("hispanic", "latino", "latina")
     ) else "no"),
     # Minimum age questions — derive from profile age (default yes if unset).
-    (["at least 18"], lambda p, j: "yes" if (p.get("personal", {}).get("age") or 99) >= 18 else "no"),
-    (["18 years of age"], lambda p, j: "yes" if (p.get("personal", {}).get("age") or 99) >= 18 else "no"),
-    (["18 or older"], lambda p, j: "yes" if (p.get("personal", {}).get("age") or 99) >= 18 else "no"),
-    (["over 18"], lambda p, j: "yes" if (p.get("personal", {}).get("age") or 99) >= 18 else "no"),
+    (["at least 18"], lambda p, j: "yes" if (
+        p.get("personal", {}).get("age") or 99) >= 18 else "no"),
+    (["18 years of age"], lambda p, j: "yes" if (
+        p.get("personal", {}).get("age") or 99) >= 18 else "no"),
+    (["18 or older"], lambda p, j: "yes" if (
+        p.get("personal", {}).get("age") or 99) >= 18 else "no"),
+    (["over 18"], lambda p, j: "yes" if (
+        p.get("personal", {}).get("age") or 99) >= 18 else "no"),
     # Non-compete / restrictive covenant — always "no"
     (["non-compete"], lambda p, j: "no"),
     (["noncompete"], lambda p, j: "no"),
@@ -129,13 +137,20 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["how many years"], lambda p, j: _years_label(p)),
     (["years"], lambda p, j: _years_label(p)),
     # Start / availability fields
-    (["available from"], lambda p, j: p.get("preferences", {}).get("available_from", "Immediately")),
-    (["available date"], lambda p, j: p.get("preferences", {}).get("available_from", "Immediately")),
-    (["start date"], lambda p, j: p.get("preferences", {}).get("available_from", "Immediately")),
-    (["earliest start"], lambda p, j: p.get("preferences", {}).get("available_from", "Immediately")),
-    (["when can you start"], lambda p, j: p.get("preferences", {}).get("available_from", "Immediately")),
-    (["when are you available"], lambda p, j: p.get("preferences", {}).get("available_from", "Immediately")),
-    (["notice period"], lambda p, j: p.get("preferences", {}).get("notice_period", "None")),
+    (["available from"], lambda p, j: p.get(
+        "preferences", {}).get("available_from", "Immediately")),
+    (["available date"], lambda p, j: p.get(
+        "preferences", {}).get("available_from", "Immediately")),
+    (["start date"], lambda p, j: p.get("preferences", {}).get(
+        "available_from", "Immediately")),
+    (["earliest start"], lambda p, j: p.get(
+        "preferences", {}).get("available_from", "Immediately")),
+    (["when can you start"], lambda p, j: p.get(
+        "preferences", {}).get("available_from", "Immediately")),
+    (["when are you available"], lambda p, j: p.get(
+        "preferences", {}).get("available_from", "Immediately")),
+    (["notice period"], lambda p, j: p.get(
+        "preferences", {}).get("notice_period", "None")),
     (["referral", "hear"], lambda p, j: p.get("preferences", {}).get(
         "referral_source", "internet search")),
     (["how did you find"], lambda p, j: p.get("preferences", {}).get(
@@ -147,11 +162,15 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["compensation"], lambda p, j: p.get("preferences", {}).get("rate", "")),
     # Pronouns
     (["pronouns"], lambda p, j: p.get("personal", {}).get("pronouns", "")),
-    (["preferred pronouns"], lambda p, j: p.get("personal", {}).get("pronouns", "")),
+    (["preferred pronouns"], lambda p, j: p.get(
+        "personal", {}).get("pronouns", "")),
     # Current job title / role
-    (["current title"], lambda p, j: p.get("personal", {}).get("current_title", "")),
-    (["current job title"], lambda p, j: p.get("personal", {}).get("current_title", "")),
-    (["current position"], lambda p, j: p.get("personal", {}).get("current_title", "")),
+    (["current title"], lambda p, j: p.get(
+        "personal", {}).get("current_title", "")),
+    (["current job title"], lambda p, j: p.get(
+        "personal", {}).get("current_title", "")),
+    (["current position"], lambda p, j: p.get(
+        "personal", {}).get("current_title", "")),
     (["current role"], lambda p, j: p.get("personal", {}).get("current_title", "")),
     (["job title"], lambda p, j: p.get("personal", {}).get("current_title", "")),
     # "org" is Lever's name attribute for the current company field.
@@ -206,9 +225,12 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["college"], lambda p, j: (p.get("education") or [{}])[0].get("school", "")),
     (["institution"], lambda p, j: (p.get("education") or [{}])[0].get("school", "")),
     (["degree"], lambda p, j: (p.get("education") or [{}])[0].get("degree", "")),
-    (["highest degree"], lambda p, j: (p.get("education") or [{}])[0].get("degree", "")),
-    (["highest level", "education"], lambda p, j: (p.get("education") or [{}])[0].get("degree", "")),
-    (["field of study"], lambda p, j: (p.get("education") or [{}])[0].get("field", "")),
+    (["highest degree"], lambda p, j: (
+        p.get("education") or [{}])[0].get("degree", "")),
+    (["highest level", "education"], lambda p, j: (
+        p.get("education") or [{}])[0].get("degree", "")),
+    (["field of study"], lambda p, j: (
+        p.get("education") or [{}])[0].get("field", "")),
     (["major"], lambda p, j: (p.get("education") or [{}])[0].get("field", "")),
     (["discipline"], lambda p, j: (p.get("education") or [{}])[0].get("field", "")),
 ]
@@ -350,7 +372,8 @@ async def fill_form(
             except Exception:
                 pass
 
-    _tlog = timing if callable(timing) else (_log if timing else (lambda _: None))
+    _tlog = timing if callable(timing) else (
+        _log if timing else (lambda _: None))
 
     actions: list[dict] = []
     # Track uploaded file paths to prevent the same file being uploaded twice
@@ -368,7 +391,8 @@ async def fill_form(
     if not dry_run:
         from utils.form_answers import pick_option as _pick_opt_pre
         _pre_handled: set[str] = set()
-        _pending_picks: list[tuple[str, str, list[str]]] = []  # (group_key, question, options)
+        # (group_key, question, options)
+        _pending_picks: list[tuple[str, str, list[str]]] = []
         for _pi, _pf in enumerate(fields):
             if _pf.get("type") != "radio":
                 continue
@@ -386,18 +410,22 @@ async def fill_form(
                 _pending_picks.append((_pgk, _pdisp, _popts))
         if _pending_picks:
             _llm_results = await asyncio.gather(
-                *[_pick_opt_pre(q, opts, profile, job) for _, q, opts in _pending_picks],
+                *[_pick_opt_pre(q, opts, profile, job)
+                  for _, q, opts in _pending_picks],
                 return_exceptions=True,
             )
             for (_pgk, _, _), _res in zip(_pending_picks, _llm_results):
-                _radio_llm_cache[_pgk] = None if isinstance(_res, Exception) else _res  # type: ignore[assignment]
+                _radio_llm_cache[_pgk] = None if isinstance(
+                    _res, Exception) else _res  # type: ignore[assignment]
 
     # Phone number: if the form has a separate country/country-code field, fill
     # only the local number in the phone field; otherwise use the full
     # international number (country code + local).
     _phone_bare = (profile.get("personal", {}).get("phone") or "").strip()
-    _phone_cc   = str(profile.get("personal", {}).get("phone_country_code") or "").strip()
-    _phone_intl = f"{_phone_cc} {_phone_bare}".strip() if _phone_cc else _phone_bare
+    _phone_cc = str(profile.get("personal", {}).get(
+        "phone_country_code") or "").strip()
+    _phone_intl = f"{_phone_cc} {_phone_bare}".strip(
+    ) if _phone_cc else _phone_bare
     _has_country_field = any(
         any(kw in (f.get("label") or "").lower()
             for kw in ("country", "country code", "phone code", "dial code", "dialing code"))
@@ -424,7 +452,8 @@ async def fill_form(
             question_text = ctx_i if len(ctx_i) > len(lbl_i) else lbl_i
             if len(question_text) < 12:
                 continue
-            lbl_check = (f"{ctx_i} {lbl_i}".strip() if ctx_i else lbl_i).lower()
+            lbl_check = (f"{ctx_i} {lbl_i}".strip()
+                         if ctx_i else lbl_i).lower()
             # For non-textarea fields: skip if a structured rule produces a value
             # (e.g. linkedin URL field, email, phone).  Textareas are always LLM
             # candidates — DOM context can bleed nearby labels (e.g. "linkedin")
@@ -439,11 +468,12 @@ async def fill_form(
                  " (this takes a few seconds): " +
                  ", ".join(f'"{q[:50]}"' for _, q in question_batch[:5]))
             llm_answers = await generate_answers(question_batch, job, profile)
-            _log(f"LLM done — answers received for {len(question_batch)} question(s).")
-
+            _log(
+                f"LLM done — answers received for {len(question_batch)} question(s).")
 
     # Track text fields that have no meaningful identifier (including those
     # with generic placeholders like "Your answer") so we can fill by position.
+
     def _is_anonymous_text(f: dict) -> bool:
         return (
             f["type"] in ("text", "email", "tel", "number", "url")
@@ -453,7 +483,8 @@ async def fill_form(
             and not f["id"]
         )
 
-    anon_text_order: list[int] = [i for i, f in enumerate(fields) if _is_anonymous_text(f)]
+    anon_text_order: list[int] = [
+        i for i, f in enumerate(fields) if _is_anonymous_text(f)]
     anon_text_position: dict[int, int] = {
         field_idx: pos for pos, field_idx in enumerate(anon_text_order)
     }
@@ -497,8 +528,10 @@ async def fill_form(
                 # try resolving by name first.  Label detection can return the
                 # wrong label when DOM structure is unusual (e.g. Lever's shifted
                 # field groups).  Name attributes are always reliable.
-                _name_value = _resolve_text_value(_fname_attr.lower(), profile, job) if _fname_attr else ""
-                value = _name_value or _resolve_text_value(label_lower, profile, job)
+                _name_value = _resolve_text_value(
+                    _fname_attr.lower(), profile, job) if _fname_attr else ""
+                value = _name_value or _resolve_text_value(
+                    label_lower, profile, job)
                 # Fallback: match by placeholder when label gives nothing
                 # (e.g. placeholder="https://www.linkedin.com/in/..." → linkedin rule).
                 if not value and ph_lower and ph_lower not in _GENERIC_PLACEHOLDERS:
@@ -524,7 +557,7 @@ async def fill_form(
 
             if not value:
                 actions.append({"field": label or f"anon-text-{idx}", "type": ftype,
-                                 "action": "skipped", "value": ""})
+                                "action": "skipped", "value": ""})
                 continue
 
             if not dry_run:
@@ -623,7 +656,8 @@ async def fill_form(
                     if chosen_text is None:
                         # Cache miss (shouldn't normally happen) — fall back to direct call.
                         from utils.form_answers import pick_option as _pick_opt
-                        _log(f'LLM picking radio for "{(group_display or label_lower)[:60]}"')
+                        _log(
+                            f'LLM picking radio for "{(group_display or label_lower)[:60]}"')
                         chosen_text = await _pick_opt(
                             group_display or label_lower, option_labels, profile, job
                         )
@@ -775,7 +809,8 @@ async def fill_form(
                                             f'LLM picking select option for "{label_lower[:60]}"')
                                         _llm_q = label_lower
                                         if any(kw in label_lower for kw in ("years", "experience", "how many", "how long")):
-                                            _yrs = (profile.get("personal") or {}).get("years_experience")
+                                            _yrs = (profile.get("personal") or {}).get(
+                                                "years_experience")
                                             if _yrs is not None:
                                                 _llm_q = f"{label_lower} (candidate has {_yrs}+ years of experience)"
                                         chosen_text = await _pick_opt(_llm_q, opt_texts, profile, job)
@@ -863,7 +898,8 @@ async def fill_form(
                 # this fill_form call (prevents resume PDF being uploaded twice
                 # when cover-letter field detection fails).
                 if file_path in _uploaded_paths:
-                    _log(f"Skipping duplicate upload of {file_path} (already uploaded this session)")
+                    _log(
+                        f"Skipping duplicate upload of {file_path} (already uploaded this session)")
                     actions.append({"field": label or fname, "type": "file",
                                     "action": "skipped", "value": f"duplicate: {file_path}",
                                     "is_cover_letter": is_cover_letter_field})
@@ -894,7 +930,8 @@ async def fill_form(
                             await fc.set_files(file_path)
                             uploaded = True
                             if is_cover_letter_field:
-                                _log("Cover letter: uploaded PDF via Attach button (Strategy 1)")
+                                _log(
+                                    "Cover letter: uploaded PDF via Attach button (Strategy 1)")
                     except Exception:
                         pass
                 # Strategy 2: click a visible <label for="id"> (some ATSes).
@@ -908,7 +945,8 @@ async def fill_form(
                             await fc.set_files(file_path)
                             uploaded = True
                             if is_cover_letter_field:
-                                _log("Cover letter: uploaded PDF via label click (Strategy 2)")
+                                _log(
+                                    "Cover letter: uploaded PDF via label click (Strategy 2)")
                     except Exception:
                         pass
                 # Strategy 3: direct set_input_files — works for standard visible
@@ -1128,7 +1166,8 @@ async def try_upload_resume(
                     return false;
                 }""")
                 if in_cl_section:
-                    _log(f"Resume upload: skipping '{selector}' #{i} (inside cover letter section)")
+                    _log(
+                        f"Resume upload: skipping '{selector}' #{i} (inside cover letter section)")
                     continue
 
                 _log(f"Resume upload: clicking '{selector}' #{i}")
@@ -1217,8 +1256,10 @@ _WA_LABEL_INDICATORS: frozenset[str] = frozenset({
 # Countries and their regex aliases for label-country detection.
 # Ordered longest-first so "united states" is matched before "us".
 _LABEL_COUNTRY_PATTERNS: list[tuple[str, list[str]]] = [
-    ("united states",  [r"united states", r"\busa\b", r"\bu\.s\.a\.?\b", r"\bu\.s\.\b"]),
-    ("united kingdom", [r"united kingdom", r"\bu\.k\.?\b", r"\bgreat britain\b", r"\bbritain\b"]),
+    ("united states",  [r"united states",
+     r"\busa\b", r"\bu\.s\.a\.?\b", r"\bu\.s\.\b"]),
+    ("united kingdom", [r"united kingdom", r"\bu\.k\.?\b",
+     r"\bgreat britain\b", r"\bbritain\b"]),
     ("new zealand",    [r"new zealand"]),
     ("south africa",   [r"south africa"]),
     ("canada",         [r"\bcanada\b"]),
@@ -1292,7 +1333,8 @@ def _resolve_text_value(label_lower: str, profile: dict, job: dict) -> str:
     if any(ind in label_lower for ind in _WA_LABEL_INDICATORS):
         wa = profile.get("work_authorization") or {}
         _META = {"sponsorship_required"}
-        authorized = {k.lower() for k, v in wa.items() if v and k.lower() not in _META}
+        authorized = {k.lower()
+                      for k, v in wa.items() if v and k.lower() not in _META}
         for canonical, patterns in _LABEL_COUNTRY_PATTERNS:
             if any(re.search(pat, label_lower) for pat in patterns):
                 return "yes" if canonical in authorized else "no"
@@ -1859,7 +1901,7 @@ def _resolve_resume_path(profile: dict, job: dict) -> str:
     return best_path
 
 
-def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
+def _resolve_cover_letter_path(profile: dict, job: dict, log_fn=None) -> str:
     """Write the job's cover letter text to a temp PDF and return its path.
 
     Returns '' if no cover letter text is available on the job dict.
@@ -1874,8 +1916,10 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
     if not text:
         return ""
 
-    company_slug = re.sub(r"[^\w-]", "_", ((job or {}).get("company") or "company"))
-    title_slug = re.sub(r"[^\w-]", "_", ((job or {}).get("title") or "position"))[:40]
+    company_slug = re.sub(
+        r"[^\w-]", "_", ((job or {}).get("company") or "company"))
+    title_slug = re.sub(
+        r"[^\w-]", "_", ((job or {}).get("title") or "position"))[:40]
 
     # Prefer PDF (accepted by all major ATSes and has no macro-safety warnings).
     # Write via BytesIO to avoid Windows file-locking issues when the same
@@ -1915,14 +1959,19 @@ def _resolve_cover_letter_path(profile: dict, job: dict) -> str:
         try:
             from datetime import date as _date
             today = _date.today().strftime("%Y-%m-%d")
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            project_root = os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))
             cl_dir = os.path.join(project_root, "cover-letters")
             os.makedirs(cl_dir, exist_ok=True)
             copy_fname = f"cover_letter_{company_slug}__{title_slug}__{today}.pdf"
             copy_path = os.path.join(cl_dir, copy_fname)
             with open(copy_path, "wb") as fh:
                 fh.write(pdf_bytes)
-            print(f"[cover_letter] saved copy → {copy_path}", flush=True)
+            msg = f"Cover letter saved → {copy_path}"
+            if log_fn:
+                log_fn(msg)
+            else:
+                print(msg, flush=True)
         except Exception as _copy_exc:
             print(f"[cover_letter] could not save copy: {_copy_exc}", flush=True)
         return path
@@ -1990,7 +2039,7 @@ async def _select_combobox_option(
         def _log(msg: str) -> None:  # noqa: F811
             pass
     if _tlog is None:
-        _tlog = lambda _: None  # noqa: E731
+        def _tlog(_): return None  # noqa: E731
     el = await _locate_field(page, field)
     if not el:
         return None
@@ -1998,7 +2047,8 @@ async def _select_combobox_option(
     await el.click()
     # Use aria-controls to scope the search to the right listbox.
     aria_controls = await el.get_attribute("aria-controls") or ""
-    _log(f"  combobox({label_lower!r}): tag={field.get('tag')!r} aria_controls={aria_controls!r}")
+    _log(
+        f"  combobox({label_lower!r}): tag={field.get('tag')!r} aria_controls={aria_controls!r}")
     # Wait for the listbox to appear instead of a fixed sleep.
     _t0 = asyncio.get_event_loop().time()
     if aria_controls:
@@ -2008,7 +2058,8 @@ async def _select_combobox_option(
             pass
     else:
         await asyncio.sleep(0.2)
-    _tlog(f"  [timing] listbox-visible({label_lower!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
+    _tlog(
+        f"  [timing] listbox-visible({label_lower!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
 
     def _query_opts(listbox_id: str) -> str:
         return """(listboxId) => {
@@ -2033,11 +2084,13 @@ async def _select_combobox_option(
     # Placeholder opts (e.g. "0 - Not Applicable") mean the real options require
     # server-side filtering — fill to trigger it.  Real option lists (race, gender,
     # "how did you hear") should not be filled; synonym/substring matching handles them.
-    _PLACEHOLDER_PATTERNS = {"not applicable", "please select", "select one", "n/a"}
+    _PLACEHOLDER_PATTERNS = {"not applicable",
+                             "please select", "select one", "n/a"}
     _opts_are_placeholder = bool(opts) and any(
         any(p in o["text"].lower() for p in _PLACEHOLDER_PATTERNS) for o in opts
     )
-    _log(f"  combobox({label_lower!r}): initial opts={[o['text'] for o in opts[:5]]} exact_match={_exact_in_opts}")
+    _log(
+        f"  combobox({label_lower!r}): initial opts={[o['text'] for o in opts[:5]]} exact_match={_exact_in_opts}")
 
     # For server-search comboboxes, typing the full value often returns nothing
     # because the server can't match a long / comma-separated string.  Compute
@@ -2050,7 +2103,8 @@ async def _select_combobox_option(
     # Using the last single significant word maximises the chance of the server
     # returning ANY results on the first attempt.  The fallback loop then refines
     # upward (1-word → 2-word → 3-word) if needed.
-    _ARTICLES = {"the", "a", "an", "of", "at", "in", "and", "or", "for", "by", "with", "&"}
+    _ARTICLES = {"the", "a", "an", "of", "at",
+                 "in", "and", "or", "for", "by", "with", "&"}
 
     def _best_seed(v: str) -> str:
         if "," in v:
@@ -2064,14 +2118,17 @@ async def _select_combobox_option(
 
     if is_input and (not opts or _opts_are_placeholder) and not _exact_in_opts:
         seed = _best_seed(value)
-        _log(f"  combobox({label_lower!r}): seed={seed!r} (from value={value!r})")
+        _log(
+            f"  combobox({label_lower!r}): seed={seed!r} (from value={value!r})")
         await el.fill(seed)
         aria_controls = await el.get_attribute("aria-controls") or ""
         _t0 = asyncio.get_event_loop().time()
         await _wait_for_listbox_opts(page, aria_controls, timeout_ms=3000)
-        _tlog(f"  [timing] fill-wait({label_lower!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
+        _tlog(
+            f"  [timing] fill-wait({label_lower!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
         opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
-        _log(f"  combobox({label_lower!r}): opts after fill={[o['text'] for o in opts[:10]]}")
+        _log(
+            f"  combobox({label_lower!r}): opts after fill={[o['text'] for o in opts[:10]]}")
     else:
         seed = value
 
@@ -2097,31 +2154,39 @@ async def _select_combobox_option(
                 "return a ? {tag: a.tagName.toLowerCase(), "
                 "itype: (a.type||'').toLowerCase(), id: a.id || ''} : {}; }"
             )
-            _log(f"  combobox({label_lower!r}): activeElement after click = {active}")
+            _log(
+                f"  combobox({label_lower!r}): activeElement after click = {active}")
             if active.get("tag") == "input" and active.get("itype", "text") in ("text", "search", ""):
                 # Prefer a stable ID-based locator so repeated fills in the
                 # fallback loop don't drift to a different focused element.
                 inner_id = active.get("id", "")
-                el = page.locator(f"[id='{inner_id}']").first if inner_id else page.locator(":focus")
+                el = page.locator(
+                    f"[id='{inner_id}']").first if inner_id else page.locator(":focus")
                 is_input = True
                 seed = _best_seed(value)
-                _log(f"  combobox({label_lower!r}): div seed={seed!r} (from value={value!r})")
+                _log(
+                    f"  combobox({label_lower!r}): div seed={seed!r} (from value={value!r})")
                 await el.fill(seed)
                 # The inner input may not carry aria-controls; preserve the outer's value.
                 inner_aria = await el.get_attribute("aria-controls") or ""
                 aria_controls = inner_aria or aria_controls
                 _t0 = asyncio.get_event_loop().time()
                 await _wait_for_listbox_opts(page, aria_controls, timeout_ms=3500)
-                _tlog(f"  [timing] div-fill-wait({label_lower!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
-                _log(f"  combobox({label_lower!r}): typed {seed!r}, aria_controls={aria_controls!r}")
+                _tlog(
+                    f"  [timing] div-fill-wait({label_lower!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
+                _log(
+                    f"  combobox({label_lower!r}): typed {seed!r}, aria_controls={aria_controls!r}")
                 opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
-                _log(f"  combobox({label_lower!r}): opts after typing = {[o['text'] for o in opts[:10]]}")
+                _log(
+                    f"  combobox({label_lower!r}): opts after typing = {[o['text'] for o in opts[:10]]}")
             else:
                 seed = value
-                _log(f"  combobox({label_lower!r}): activeElement not an input — skipping fill")
+                _log(
+                    f"  combobox({label_lower!r}): activeElement not an input — skipping fill")
         except Exception as exc:
             seed = value
-            _log(f"  combobox({label_lower!r}): exception in not-is_input block: {exc}")
+            _log(
+                f"  combobox({label_lower!r}): exception in not-is_input block: {exc}")
 
     # If the seed produced no options, retry with progressively longer terms
     # (1-word → 2-word → 3-word), then individual significant words.
@@ -2146,9 +2211,11 @@ async def _select_combobox_option(
             aria_controls = await el.get_attribute("aria-controls") or ""
             _t0 = asyncio.get_event_loop().time()
             await _wait_for_listbox_opts(page, aria_controls, timeout_ms=2500)
-            _tlog(f"  [timing] fallback-wait({label_lower!r}, {term!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
+            _tlog(
+                f"  [timing] fallback-wait({label_lower!r}, {term!r}): {(asyncio.get_event_loop().time()-_t0)*1000:.0f}ms")
             opts = await page.evaluate(_query_opts(aria_controls), aria_controls)
-            _log(f"  combobox({label_lower!r}): fallback term={term!r} opts={[o['text'] for o in opts[:5]]}")
+            _log(
+                f"  combobox({label_lower!r}): fallback term={term!r} opts={[o['text'] for o in opts[:5]]}")
             if opts:
                 break
 
@@ -2157,7 +2224,7 @@ async def _select_combobox_option(
         return None
 
     val_lower = value.lower()
-    opt_texts_lower = [ o["text"].lower() for o in opts]
+    opt_texts_lower = [o["text"].lower() for o in opts]
 
     # 1. Exact case-insensitive match.
     for i, t in enumerate(opt_texts_lower):
@@ -2209,7 +2276,8 @@ async def _select_combobox_option(
             break
 
     if synonym_dict is not None:
-        synonyms = synonym_dict.get(val_lower, [val_lower]) if isinstance(synonym_dict, dict) else [val_lower]
+        synonyms = synonym_dict.get(val_lower, [val_lower]) if isinstance(
+            synonym_dict, dict) else [val_lower]
         for i, t in enumerate(opt_texts_lower):
             opt_words = set(re.findall(r"\w+", t))
             # Each synonym entry can be either a whole-word check or a phrase match.
@@ -2285,7 +2353,8 @@ def _auth_for_job_country(profile: dict, job: dict) -> str:
     # Build the set of countries the candidate is authorized to work in.
     # Each truthy key in work_authorization (except meta-keys) is a country.
     _META = {"sponsorship_required"}
-    authorized = {k.lower() for k, v in wa.items() if v and k.lower() not in _META}
+    authorized = {k.lower()
+                  for k, v in wa.items() if v and k.lower() not in _META}
 
     if any(country in location for country in authorized):
         return "yes"
