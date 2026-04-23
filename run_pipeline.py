@@ -612,17 +612,17 @@ def full_run(source: str, profile: str, model: str, analyze_status: str, analyze
                             .filter(Job.status == "shortlisted")
                             .order_by(Job.id.desc())
                             .limit(new_shortlisted).all())
-                    new_jobs += [{"title": j.title, "company": j.company,
+                    new_jobs += [{"id": j.id, "title": j.title, "company": j.company,
                                   "fit_score": j.fit_score, "status": "shortlisted",
-                                  "source": j.source} for j in jobs]
+                                  "source": j.source, "url": j.url} for j in jobs]
                 if new_review > 0:
                     jobs = (session.query(Job)
                             .filter(Job.status == "review", Job.llm_status.is_(None))
                             .order_by(Job.id.desc())
                             .limit(new_review).all())
-                    new_jobs += [{"title": j.title, "company": j.company,
+                    new_jobs += [{"id": j.id, "title": j.title, "company": j.company,
                                   "fit_score": j.fit_score, "status": "review",
-                                  "source": j.source} for j in jobs]
+                                  "source": j.source, "url": j.url} for j in jobs]
                 send_report(new_jobs, after)
             else:
                 logger.info("No new shortlisted or review jobs — skipping email report.")
