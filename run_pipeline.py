@@ -85,7 +85,7 @@ SYSTEM_BROWSER_DOMAINS = {
 
 # Sources disabled from 'all' by default.
 # Enable individually with --source <name>.
-DISABLED_SOURCES: set[str] = set()
+DISABLED_SOURCES: set[str] = {"weworkremotely"}
 
 engine = create_engine(config.DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -736,7 +736,8 @@ def help_command():
         ("", "SOURCES", ""),
         ("", "remotive  arbeitnow  jobicy  jobspresso  dynamitejobs", ""),
         ("", "workingnomads  getonboard  himalayas  adzuna  ashby  greenhouse  lever  direct_ats  (all = all enabled sources)", ""),
-        ("", "remoteok  weworkremotely  (disabled by default)", ""),
+        ("", "remoteok  (disabled by default)", ""),
+        ("", "weworkremotely  (disabled — requires paid subscription)", ""),
     ]
 
     HIGHLIGHT = {"full-run", "open-job"}
