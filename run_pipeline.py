@@ -1352,6 +1352,49 @@ def cover_letter_cmd(job_id: int, profile: str, model: str, regenerate: bool):
         session.close()
 
 
+@cli.command(name='interview-prep')
+@click.argument('job_application_id', type=int)
+@click.option('--profile', default='profile.yaml', show_default=True, help='Path to candidate profile YAML')
+def interview_prep_cmd(job_application_id: int, profile: str):
+    """Generate a personalized interview prep sheet for a job application."""
+    from utils.interview_prep import run_interview_prep
+
+    profile_data = _load_profile(profile)
+    if not profile_data:
+        click.echo(click.style(f"Could not load profile from {profile}", fg="red"), err=True)
+        sys.exit(1)
+
+    def _progress(step: int, msg: str) -> None:
+        click.echo(f"[{step}/6] {msg}")
+
+    session = SessionLocal()
+    try:
+        sheet = run_interview_prep(job_application_id, profile_data, session, progress_callback=_progress)
+        click.echo(click.style(f"\n✅ Interview prep sheet saved (ID: {sheet.id})", fg="green"))
+
+        import json as _json
+        sections = [
+            ("Company Snapshot", sheet.company_snapshot),
+            ("Role Summary", sheet.role_requirements_summary),
+            ("Technical Questions", sheet.likely_technical_questions),
+            ("Behavioral Questions", sheet.likely_behavioral_questions),
+            ("Talking Points", sheet.talking_points),
+            ("Gaps / Risks", sheet.gaps_or_risks),
+            ("30-Min Prep Plan", sheet.prep_plan_30_min),
+        ]
+        for title, raw in sections:
+            click.echo(click.style(f"\n--- {title} ---", fg="cyan"))
+            try:
+                click.echo(_json.dumps(_json.loads(raw), indent=2, ensure_ascii=False))
+            except (TypeError, ValueError):
+                click.echo(str(raw))
+    except (ValueError, RuntimeError) as exc:
+        click.echo(click.style(str(exc), fg="red"), err=True)
+        sys.exit(1)
+    finally:
+        session.close()
+
+
 @cli.command(name='perf')
 @click.option('--job', default=None, help='Filter to runs matching this job substring (e.g. "Coinbase")')
 @click.option('--last', default=10, type=int, show_default=True, help='Number of most-recent runs to plot')
