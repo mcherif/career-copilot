@@ -5,14 +5,13 @@ Uses an in-memory SQLite session and mocks requests.post so no real
 Ollama instance is needed.
 """
 import json
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-import config
 from models.database import Base, InterviewPrepSheet, Job
 from utils.interview_prep import run_interview_prep
 
