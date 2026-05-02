@@ -31,7 +31,7 @@ from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 
 import config
-from models.database import Job
+from models.database import InterviewPrepSheet, Job
 
 # ---------------------------------------------------------------------------
 # App + DB
@@ -859,6 +859,95 @@ async def prefill_url(body: DirectFillRequest):
 
     threading.Thread(target=_run_prefill_thread, args=(job_dict, profile), daemon=True).start()
     return {"ok": True, "message": "Browser opening…"}
+
+
+# ---------------------------------------------------------------------------
+# Interview prep
+# ---------------------------------------------------------------------------
+
+_prep_running: Dict[int, bool] = {}
+_prep_lock = threading.Lock()
+
+
+def _prep_sheet_to_dict(sheet: InterviewPrepSheet) -> Dict[str, Any]:
+    def _j(raw):
+        if not raw:
+            return None
+        try:
+            import json as _json
+            return _json.loads(raw)
+        except Exception:
+            return raw
+
+    return {
+        "id": sheet.id,
+        "job_application_id": sheet.job_application_id,
+        "status": sheet.status,
+        "company_snapshot": _j(sheet.company_snapshot),
+        "role_requirements_summary": _j(sheet.role_requirements_summary),
+        "likely_technical_questions": _j(sheet.likely_technical_questions),
+        "likely_behavioral_questions": _j(sheet.likely_behavioral_questions),
+        "talking_points": _j(sheet.talking_points),
+        "gaps_or_risks": _j(sheet.gaps_or_risks),
+        "prep_plan_30_min": _j(sheet.prep_plan_30_min),
+        "error_message": sheet.error_message,
+        "generated_at": sheet.generated_at.isoformat() if sheet.generated_at else None,
+    }
+
+
+def _run_prep_thread(job_id: int) -> None:
+    from utils.interview_prep import run_interview_prep
+
+    session = _Session()
+    try:
+        with open("profile.yaml", encoding="utf-8") as fh:
+            profile = yaml.safe_load(fh) or {}
+    except Exception:
+        profile = {}
+
+    try:
+        run_interview_prep(job_id, profile, session)
+    except Exception:
+        pass
+    finally:
+        session.close()
+        with _prep_lock:
+            _prep_running.pop(job_id, None)
+
+
+@app.get("/api/jobs/{job_id}/interview-prep")
+async def get_interview_prep(job_id: int):
+    session = _Session()
+    try:
+        sheet = session.query(InterviewPrepSheet).filter(
+            InterviewPrepSheet.job_application_id == job_id
+        ).first()
+        if not sheet:
+            with _prep_lock:
+                running = _prep_running.get(job_id, False)
+            return {"found": False, "running": running}
+        return {"found": True, "running": False, "sheet": _prep_sheet_to_dict(sheet)}
+    finally:
+        session.close()
+
+
+@app.post("/api/jobs/{job_id}/interview-prep")
+async def generate_interview_prep(job_id: int):
+    session = _Session()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            raise HTTPException(404, f"Job {job_id} not found")
+    finally:
+        session.close()
+
+    with _prep_lock:
+        if _prep_running.get(job_id):
+            return {"ok": True, "message": "Already generating"}
+        _prep_running[job_id] = True
+
+    threading.Thread(target=_run_prep_thread, args=(job_id,), daemon=True).start()
+    return {"ok": True, "message": "Generation started"}
 
 
 # ---------------------------------------------------------------------------
