@@ -1,5 +1,5 @@
 import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, Date, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, DateTime, Date, UniqueConstraint, ForeignKey
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -62,3 +62,20 @@ class ApplicationHistory(Base):
     __table_args__ = (
         UniqueConstraint("company", "job_title", name="_company_job_uc"),
     )
+
+class InterviewPrepSheet(Base):
+    __tablename__ = "interview_prep_sheets"
+
+    id = Column(Integer, primary_key=True)
+    job_application_id = Column(Integer, ForeignKey("jobs.id"), unique=True, nullable=False)
+    status = Column(String, nullable=False, default="processing")
+    company_snapshot = Column(Text, nullable=True)
+    role_requirements_summary = Column(Text, nullable=True)
+    likely_technical_questions = Column(Text, nullable=True)
+    likely_behavioral_questions = Column(Text, nullable=True)
+    talking_points = Column(Text, nullable=True)
+    gaps_or_risks = Column(Text, nullable=True)
+    prep_plan_30_min = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    generated_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
