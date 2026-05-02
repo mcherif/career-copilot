@@ -72,6 +72,24 @@ class HimalayasConnector(BaseConnector):
         logger.info(f"Successfully fetched {len(all_jobs)} remote jobs from {self.source_name}")
         return all_jobs
 
+    @staticmethod
+    def _resolve_apply_url(app_link: str) -> str:
+        """Follow redirects on Himalayas apply links to get the final ATS URL.
+
+        Himalayas often stores links as himalayas.app/... which triggers
+        Cloudflare when Playwright tries to open them.  A HEAD request at
+        fetch time resolves the redirect chain once and stores the real URL.
+        """
+        if not app_link or "himalayas.app" not in app_link:
+            return app_link
+        try:
+            r = requests.head(app_link, allow_redirects=True, timeout=8,
+                              headers={"User-Agent": "Mozilla/5.0"})
+            final = r.url
+            return final if final and final != app_link else app_link
+        except Exception:
+            return app_link
+
     def normalize(self, raw_job: Dict[str, Any]) -> Dict[str, Any]:
         pub = raw_job.get("pubDate")
         posted_date = None
@@ -82,7 +100,7 @@ class HimalayasConnector(BaseConnector):
                 pass
 
         app_link = raw_job.get("applicationLink", "")
-        url = app_link if app_link else ""
+        url = self._resolve_apply_url(app_link) if app_link else ""
 
         description = raw_job.get("description") or raw_job.get("excerpt") or ""
 
