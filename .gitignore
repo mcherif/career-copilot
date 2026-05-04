@@ -59,3 +59,5 @@ resumes/
 *.pdf
 profile.yaml
 demo_restore.json
+# BrainGrid temp files
+.braingrid/temp/
