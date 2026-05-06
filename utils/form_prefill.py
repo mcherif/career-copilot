@@ -175,12 +175,22 @@ async def run_prefill_session(
 
     try:
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=headless)
+            browser = await pw.chromium.launch(
+                headless=headless,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                ],
+            )
             _ctx_kwargs: dict = {}
             if _saved_state:
                 _ctx_kwargs["storage_state"] = _saved_state
                 _log(f"Restoring saved {_SESSION_DOMAIN} session…")
             context = await browser.new_context(**_ctx_kwargs)
+            # Mask navigator.webdriver so Cloudflare bot-detection passes.
+            await context.add_init_script(
+                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
+            )
             page = await context.new_page()
 
             result: Dict[str, Any] = {"ats": "unknown", "filled": 0, "skipped": 0, "errors": 0}
@@ -224,6 +234,42 @@ async def run_prefill_session(
             except Exception as exc:
                 await browser.close()
                 return {"status": "failed", "error": f"Page load failed: {exc}"}
+
+            # Himalayas: wait up to 12 s for Cloudflare JS challenge to clear,
+            # then extract the real employer apply URL from the job page.
+            if "himalayas.app" in page.url:
+                try:
+                    _log("Himalayas page — waiting for Cloudflare challenge…")
+                    await page.wait_for_function(
+                        "document.title && !document.title.startsWith('Just a moment')",
+                        timeout=12000,
+                    )
+                    # Find the Apply link (href to an external ATS host)
+                    _hm_apply = await page.evaluate("""
+                        () => {
+                            const candidates = [
+                                ...document.querySelectorAll('a[href]')
+                            ].filter(a => {
+                                const h = a.href || '';
+                                const t = (a.textContent || '').trim().toLowerCase();
+                                return !h.includes('himalayas.app') && h.startsWith('http') && (
+                                    t.includes('apply') || a.className.toLowerCase().includes('apply')
+                                );
+                            });
+                            return candidates.length ? candidates[0].href : null;
+                        }
+                    """)
+                    if _hm_apply:
+                        _log(f"Himalayas apply link → {_hm_apply[:80]}")
+                        await page.goto(_hm_apply, wait_until="load", timeout=30000)
+                        await _wait_for_spa(page)
+                    else:
+                        _log("Himalayas: no external apply link found — trying Apply button click…")
+                        _clicked, page = await try_click_apply(page)
+                        if _clicked:
+                            await _wait_for_spa(page)
+                except Exception:
+                    _log("Himalayas Cloudflare challenge not cleared — browser is open for manual navigation.")
 
             # Resolve direct apply URL from listing aggregators.
             # Skip if already on a known ATS page or if a child frame is already
@@ -324,6 +370,23 @@ async def run_prefill_session(
                     ).first
                     if await btn.count() > 0 and await btn.is_visible(timeout=2000):
                         _log("Personio: clicking 'Apply for this job'…")
+                        await btn.click()
+                        await _wait_for_spa(active_page)
+                except Exception:
+                    pass
+
+            # BambooHR shortcut: the form is inline on the listing page — clicking
+            # "Submit Application" reveals it without navigating to a new URL.
+            if ats == "bamboohr":
+                try:
+                    btn = active_page.locator(
+                        "button:has-text('Submit Application'), "
+                        "a:has-text('Submit Application'), "
+                        "button:has-text('Apply Now'), "
+                        "a:has-text('Apply Now')"
+                    ).first
+                    if await btn.count() > 0 and await btn.is_visible(timeout=3000):
+                        _log("BambooHR: clicking 'Submit Application'…")
                         await btn.click()
                         await _wait_for_spa(active_page)
                 except Exception:

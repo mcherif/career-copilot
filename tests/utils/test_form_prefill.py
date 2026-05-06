@@ -31,6 +31,7 @@ def _make_context(page):
     """Return a mock BrowserContext that owns *page* and records callbacks."""
     ctx = MagicMock()
     ctx.new_page = AsyncMock(return_value=page)
+    ctx.add_init_script = AsyncMock()
     ctx.storage_state = AsyncMock()
     ctx.pages = [page]
     _callbacks = {}
