@@ -617,7 +617,7 @@ def full_run(source: str, profile: str, model: str, analyze_status: str, analyze
                                   "source": j.source, "url": j.url} for j in jobs]
                 if new_review > 0:
                     jobs = (session.query(Job)
-                            .filter(Job.status == "review", Job.llm_status.is_(None))
+                            .filter(Job.status == "review")
                             .order_by(Job.id.desc())
                             .limit(new_review).all())
                     new_jobs += [{"id": j.id, "title": j.title, "company": j.company,
