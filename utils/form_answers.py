@@ -113,9 +113,12 @@ def _call_ollama_pick(
     Returns the exact option text, or None on failure.
     """
     p = profile.get("personal", {})
+    _country = p.get("phone_country") or p.get("location", "").split(",")[-1].strip()
     profile_summary = ", ".join(filter(None, [
         f"name={p.get('name', '')}",
+        f"country={_country}",
         f"location={p.get('location', '')}",
+        f"state/province={p.get('state', '')}",
         f"gender={p.get('gender', '')}",
         f"race={p.get('race', '')}",
         f"sexual_orientation={p.get('sexual_orientation', '')}",

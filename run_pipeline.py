@@ -675,8 +675,8 @@ def send_test_email():
     from dotenv import load_dotenv
     load_dotenv()
     dummy_jobs = [
-        {"title": "Test: Senior ML Engineer", "company": "Acme Corp", "fit_score": 75, "status": "shortlisted", "source": "remotive"},
-        {"title": "Test: Backend Engineer", "company": "Startup Inc", "fit_score": 52, "status": "review", "source": "arbeitnow"},
+        {"id": 1, "title": "Test: Senior ML Engineer", "company": "Acme Corp", "fit_score": 75, "status": "shortlisted", "source": "remotive", "url": "https://remotive.com/jobs/example-ml-engineer"},
+        {"id": 2, "title": "Test: Backend Engineer", "company": "Startup Inc", "fit_score": 52, "status": "review", "source": "arbeitnow", "url": "https://arbeitnow.com/jobs/example-backend-engineer"},
     ]
     dummy_counts = {"shortlisted": 3, "review": 12, "applied": 1, "deferred": 0, "rejected": 84}
     ok = send_report(dummy_jobs, dummy_counts)

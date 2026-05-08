@@ -28,16 +28,15 @@ def _build_html(new_jobs: List[Dict[str, Any]], counts: Dict[str, int]) -> str:
         status = job["status"]
         badge_color = "#2e7d32" if status == "shortlisted" else "#e65100"
         job_url = job.get("url") or ""
-        job_id = job.get("id") or ""
         title_cell = (
             f'<a href="{job_url}" style="color:#1565c0;text-decoration:none;">{job["title"]}</a>'
             if job_url else job["title"]
         )
         apply_cell = (
-            f'<a href="http://localhost:7860?job_id={job_id}" '
+            f'<a href="{job_url}" '
             f'style="font-size:0.8em;color:#fff;background:#1565c0;padding:2px 7px;'
             f'border-radius:3px;text-decoration:none;">Apply</a>'
-            if job_id else ""
+            if job_url else ""
         )
         new_rows += (
             f'<tr>'

@@ -151,6 +151,37 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
 .cover-letter-textarea:focus{border-color:var(--accent);background:var(--bg-hover);}
 .cover-letter-textarea.loading{color:var(--text-muted);font-style:italic;}
 .cover-actions{display:flex;gap:8px;}
+.prep-sheet{display:flex;flex-direction:column;gap:14px;padding:4px 0;}
+.prep-section{background:var(--bg-subtle);border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+.prep-section-head{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--bg-hover);border-bottom:1px solid var(--border);}
+.prep-section-icon{font-size:14px;}
+.prep-section-title{font-weight:600;font-size:13px;color:var(--text-primary);}
+.prep-section-body{padding:12px 14px;}
+.prep-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}
+.prep-pill{padding:3px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:99px;font-size:12px;color:var(--text-secondary);}
+.prep-pill.danger{border-color:rgba(239,68,68,.35);color:var(--red);}
+.prep-pill.skill{border-color:rgba(59,130,246,.3);color:var(--accent);}
+.prep-kv{display:flex;gap:6px;margin-bottom:6px;font-size:13px;color:var(--text-secondary);}
+.prep-kv-label{font-weight:600;color:var(--text-muted);white-space:nowrap;min-width:80px;}
+.prep-q{padding:7px 0;border-bottom:1px solid var(--border-subtle);font-size:13px;color:var(--text-secondary);line-height:1.5;display:flex;gap:8px;}
+.prep-q:last-child{border-bottom:none;}
+.prep-q-num{font-size:11px;font-weight:700;color:var(--text-muted);min-width:18px;padding-top:2px;}
+.prep-tp{padding:9px 0;border-bottom:1px solid var(--border-subtle);}
+.prep-tp:last-child{border-bottom:none;}
+.prep-tp-req{font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;}
+.prep-tp-evidence{font-size:13px;color:var(--text-secondary);margin-bottom:3px;}
+.prep-tp-story{font-size:12.5px;color:var(--text-muted);font-style:italic;padding-left:8px;border-left:2px solid var(--border);}
+.prep-plan-block{margin-bottom:12px;}
+.prep-plan-block:last-of-type{margin-bottom:0;}
+.prep-plan-header{font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;}
+.prep-plan-item{padding:3px 0;font-size:13px;color:var(--text-secondary);display:flex;gap:8px;line-height:1.5;}
+.prep-plan-item::before{content:"•";color:var(--text-muted);flex-shrink:0;}
+.prep-priority{background:linear-gradient(135deg,rgba(59,130,246,.1),rgba(139,92,246,.1));border:1px solid rgba(59,130,246,.25);border-radius:8px;padding:12px 14px;margin-top:10px;}
+.prep-priority-label{font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
+.prep-priority-text{font-size:13.5px;font-weight:600;color:var(--text-primary);line-height:1.5;}
+.prep-empty{padding:28px;text-align:center;color:var(--text-muted);font-size:13.5px;line-height:1.7;}
+.prep-actions{display:flex;gap:8px;margin-top:4px;}
+.prep-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px;}
 .btn-secondary{display:flex;align-items:center;gap:6px;padding:8px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:var(--text-secondary);cursor:pointer;transition:all var(--transition);box-shadow:var(--shadow-sm);}
 .btn-secondary:hover{border-color:var(--accent-mid);color:var(--accent);background:var(--accent-light);}
 .btn-secondary:disabled{opacity:.5;cursor:default;}
@@ -378,6 +409,7 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
         <div class="card-tab active" onclick="switchTab('overview',this)">Overview</div>
         <div class="card-tab" onclick="switchTab('analysis',this)">Analysis</div>
         <div class="card-tab" onclick="switchTab('cover',this)">Cover Letter</div>
+        <div class="card-tab" onclick="switchTab('prep',this);loadPrep()">Interview Prep</div>
         <div class="card-tab" onclick="switchTab('description',this)">Description</div>
       </div>
       <div class="tab-pane active" id="pane-overview">
@@ -416,6 +448,15 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
               PDF
             </button>
           </div>
+        </div>
+      </div>
+      <div class="tab-pane" id="pane-prep">
+        <div id="prepContent">
+          <div class="prep-empty">Click <strong>Generate</strong> to create your personalised interview prep sheet.</div>
+          <div class="prep-actions"><button class="btn-secondary" id="btnGenPrep" onclick="generatePrep()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            Generate
+          </button></div>
         </div>
       </div>
       <div class="tab-pane" id="pane-description">
@@ -778,6 +819,165 @@ async function generateCover() {
   } finally {
     btn.disabled = false;
   }
+}
+
+// ── Interview Prep ─────────────────────────────────────────────────────────
+let _prepPollTimer = null;
+
+async function loadPrep() {
+  const job = jobs[idx];
+  if (!job) return;
+  try {
+    const data = await api(`/api/jobs/${job.id}/interview-prep`);
+    if (data.found) {
+      renderPrepSheet(data.sheet);
+    } else if (data.running) {
+      _setPrepLoading(true);
+      _schedulePrepPoll(job.id);
+    }
+    // else: leave the default "Generate" prompt
+  } catch(e) { /* ignore */ }
+}
+
+async function generatePrep() {
+  const job = jobs[idx];
+  if (!job) return;
+  const btn = document.getElementById('btnGenPrep');
+  if (btn) btn.disabled = true;
+  try {
+    await api(`/api/jobs/${job.id}/interview-prep`, 'POST');
+    _setPrepLoading(true);
+    _schedulePrepPoll(job.id);
+  } catch(e) {
+    showToast('Failed to start generation: ' + e.message, 'error');
+    if (btn) btn.disabled = false;
+  }
+}
+
+function _setPrepLoading(on) {
+  const el = document.getElementById('prepContent');
+  if (!el) return;
+  if (on) {
+    el.innerHTML = `<div class="prep-empty"><span class="prep-spinner"></span>Generating your personalised prep sheet — this takes about a minute…</div>`;
+  }
+}
+
+function _schedulePrepPoll(jobId) {
+  clearTimeout(_prepPollTimer);
+  _prepPollTimer = setTimeout(async () => {
+    // Only keep polling if we're still on the same job's prep tab
+    if (!jobs[idx] || jobs[idx].id !== jobId || activeTab !== 'prep') return;
+    try {
+      const data = await api(`/api/jobs/${jobId}/interview-prep`);
+      if (data.found) {
+        renderPrepSheet(data.sheet);
+      } else if (data.running || data.sheet?.status === 'processing') {
+        _schedulePrepPoll(jobId);
+      }
+    } catch(e) { /* retry */ _schedulePrepPoll(jobId); }
+  }, 2500);
+}
+
+function renderPrepSheet(sheet) {
+  clearTimeout(_prepPollTimer);
+  const el = document.getElementById('prepContent');
+  if (!el) return;
+
+  if (sheet.status === 'failed') {
+    el.innerHTML = `<div class="prep-empty" style="color:var(--red)">Generation failed: ${esc(sheet.error_message || 'Unknown error')}</div>
+      <div class="prep-actions"><button class="btn-secondary" id="btnGenPrep" onclick="generatePrep()">Retry</button></div>`;
+    return;
+  }
+
+  if (sheet.status === 'processing') {
+    _setPrepLoading(true);
+    _schedulePrepPoll(sheet.job_application_id);
+    return;
+  }
+
+  const snap = sheet.company_snapshot || {};
+  const role = sheet.role_requirements_summary || {};
+  const techQs = sheet.likely_technical_questions || [];
+  const behavQs = sheet.likely_behavioral_questions || [];
+  const tps = sheet.talking_points || [];
+  const gaps = sheet.gaps_or_risks || [];
+  const plan = sheet.prep_plan_30_min || {};
+
+  function pills(arr, cls='') { return (arr||[]).map(s=>`<span class="prep-pill ${cls}">${esc(s)}</span>`).join(''); }
+  function qs(arr) { return arr.map((q,i)=>`<div class="prep-q"><span class="prep-q-num">${i+1}.</span><span>${esc(q)}</span></div>`).join(''); }
+  function planItems(arr) { return (arr||[]).map(s=>`<div class="prep-plan-item">${esc(s)}</div>`).join(''); }
+
+  el.innerHTML = `
+    <div class="prep-sheet">
+
+      <div class="prep-section">
+        <div class="prep-section-head"><span class="prep-section-icon">🏢</span><span class="prep-section-title">Company Snapshot</span></div>
+        <div class="prep-section-body">
+          <div class="prep-kv"><span class="prep-kv-label">Industry</span><span>${esc(snap.industry||'—')}</span></div>
+          <div class="prep-kv"><span class="prep-kv-label">Size</span><span>${esc(snap.likely_size||'—')}</span></div>
+          ${snap.culture_signals?.length ? `<div class="prep-kv"><span class="prep-kv-label">Culture</span><div class="prep-pills">${pills(snap.culture_signals)}</div></div>` : ''}
+          ${snap.red_flags?.length ? `<div class="prep-kv"><span class="prep-kv-label">Watch out</span><div class="prep-pills">${pills(snap.red_flags,'danger')}</div></div>` : ''}
+        </div>
+      </div>
+
+      <div class="prep-section">
+        <div class="prep-section-head"><span class="prep-section-icon">🎯</span><span class="prep-section-title">Role Summary</span></div>
+        <div class="prep-section-body">
+          ${role.must_have_skills?.length ? `<div class="prep-kv"><span class="prep-kv-label">Must-have</span><div class="prep-pills">${pills(role.must_have_skills,'skill')}</div></div>` : ''}
+          ${role.nice_to_have_skills?.length ? `<div class="prep-kv"><span class="prep-kv-label">Nice-to-have</span><div class="prep-pills">${pills(role.nice_to_have_skills)}</div></div>` : ''}
+          ${role.seniority_signals ? `<div class="prep-kv"><span class="prep-kv-label">Seniority</span><span>${esc(role.seniority_signals)}</span></div>` : ''}
+          ${role.core_responsibilities?.length ? `<div style="margin-top:6px">${role.core_responsibilities.map(r=>`<div class="prep-q"><span class="prep-q-num">•</span><span>${esc(r)}</span></div>`).join('')}</div>` : ''}
+        </div>
+      </div>
+
+      <div class="prep-section">
+        <div class="prep-section-head"><span class="prep-section-icon">⚙️</span><span class="prep-section-title">Technical Questions</span></div>
+        <div class="prep-section-body">${qs(techQs) || '<span style="color:var(--text-muted);font-size:13px">None predicted.</span>'}</div>
+      </div>
+
+      <div class="prep-section">
+        <div class="prep-section-head"><span class="prep-section-icon">💬</span><span class="prep-section-title">Behavioral Questions</span></div>
+        <div class="prep-section-body">${qs(behavQs) || '<span style="color:var(--text-muted);font-size:13px">None predicted.</span>'}</div>
+      </div>
+
+      <div class="prep-section">
+        <div class="prep-section-head"><span class="prep-section-icon">💡</span><span class="prep-section-title">Your Talking Points</span></div>
+        <div class="prep-section-body">${tps.map(tp=>`
+          <div class="prep-tp">
+            <div class="prep-tp-req">${esc(tp.jd_requirement||'')}</div>
+            <div class="prep-tp-evidence">${esc(tp.candidate_evidence||'')}</div>
+            ${tp.suggested_story ? `<div class="prep-tp-story">${esc(tp.suggested_story)}</div>` : ''}
+          </div>`).join('') || '<span style="color:var(--text-muted);font-size:13px">No talking points mapped.</span>'}</div>
+      </div>
+
+      ${gaps.length ? `<div class="prep-section">
+        <div class="prep-section-head"><span class="prep-section-icon">⚠️</span><span class="prep-section-title">Gaps &amp; Risks</span></div>
+        <div class="prep-section-body">${gaps.map(g=>`
+          <div class="prep-tp">
+            <div class="prep-tp-req" style="color:var(--red)">${esc(g.jd_requirement||'')}</div>
+            <div class="prep-tp-evidence">${esc(g.gap_description||'')}</div>
+            ${g.mitigation ? `<div class="prep-tp-story">💡 ${esc(g.mitigation)}</div>` : ''}
+          </div>`).join('')}</div>
+      </div>` : ''}
+
+      <div class="prep-section">
+        <div class="prep-section-head"><span class="prep-section-icon">⏱️</span><span class="prep-section-title">30-Min Prep Plan</span></div>
+        <div class="prep-section-body">
+          ${plan.minutes_0_10?.length ? `<div class="prep-plan-block"><div class="prep-plan-header">0–10 min</div>${planItems(plan.minutes_0_10)}</div>` : ''}
+          ${plan.minutes_10_20?.length ? `<div class="prep-plan-block"><div class="prep-plan-header">10–20 min</div>${planItems(plan.minutes_10_20)}</div>` : ''}
+          ${plan.minutes_20_30?.length ? `<div class="prep-plan-block"><div class="prep-plan-header">20–30 min</div>${planItems(plan.minutes_20_30)}</div>` : ''}
+          ${plan.priority_note ? `<div class="prep-priority"><div class="prep-priority-label">🏆 Top priority</div><div class="prep-priority-text">${esc(plan.priority_note)}</div></div>` : ''}
+        </div>
+      </div>
+
+      <div class="prep-actions">
+        <button class="btn-secondary" id="btnGenPrep" onclick="generatePrep()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Regenerate
+        </button>
+      </div>
+
+    </div>`;
 }
 
 function copyCover() {
@@ -1173,7 +1373,7 @@ function switchTabById(name) {
   const tabs = document.querySelectorAll('.card-tab');
   const panes = document.querySelectorAll('.tab-pane');
   tabs.forEach((t, i) => {
-    const names = ['overview','analysis','cover','description'];
+    const names = ['overview','analysis','cover','prep','description'];
     t.classList.toggle('active', names[i] === name);
   });
   panes.forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));

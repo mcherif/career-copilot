@@ -132,6 +132,13 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["where"], lambda p, j: p.get("personal", {}).get("location", "")),
     (["city"], lambda p, j: p.get("personal", {}).get("location", "")),
     (["country"], lambda p, j: p.get("personal", {}).get("location", "")),
+    (["address"], lambda p, j: p.get("personal", {}).get("address", "")),
+    (["street"], lambda p, j: p.get("personal", {}).get("address", "")),
+    (["zip"], lambda p, j: p.get("personal", {}).get("postal_code", "")),
+    (["postal"], lambda p, j: p.get("personal", {}).get("postal_code", "")),
+    (["state", "province"], lambda p, j: p.get("personal", {}).get("state", "")),
+    (["state"], lambda p, j: p.get("personal", {}).get("state", "")),
+    (["province"], lambda p, j: p.get("personal", {}).get("state", "")),
     (["years of experience"], lambda p, j: _years_label(p)),
     (["years experience"], lambda p, j: _years_label(p)),
     (["how many years"], lambda p, j: _years_label(p)),
@@ -801,8 +808,50 @@ async def fill_form(
                                                 if chosen_val:
                                                     break
                                             break
+                                # 3a. State/province special case: if the option list looks like
+                                # US states and the candidate isn't from the US, try "Other"/
+                                # "International"/"N/A" before falling back to the LLM to avoid
+                                # picking a wrong US state.
+                                _is_state_field = any(
+                                    kw in label_lower for kw in ("state", "province")
+                                )
+                                if not chosen_val and _is_state_field:
+                                    _us_state_kws = {"alabama", "alaska", "california",
+                                                     "florida", "new york", "texas"}
+                                    _opt_lower = {t.lower() for t in opt_texts}
+                                    _looks_us = bool(_us_state_kws & _opt_lower)
+                                    _profile_country = (
+                                        (profile.get("personal") or {}).get("phone_country") or ""
+                                    ).lower()
+                                    _is_non_us = _looks_us and _profile_country not in (
+                                        "", "united states", "us", "usa"
+                                    )
+                                    if _is_non_us:
+                                        _intl_opts = [
+                                            "other", "n/a", "international",
+                                            "outside us", "outside the us",
+                                            "outside united states", "not applicable",
+                                        ]
+                                        for _intl in _intl_opts:
+                                            for t, v in zip(opt_texts, opt_vals):
+                                                if _intl in t.lower():
+                                                    chosen_val = v
+                                                    break
+                                            if chosen_val:
+                                                break
+                                        if not chosen_val:
+                                            # No "Other" option — skip rather than pick wrong US state
+                                            _log('State/province dropdown appears US-only; skipping for non-US candidate')
+                                            chosen_val = None
+                                            # Set a sentinel to skip the LLM call below
+                                            _skip_llm_state = True
+                                    else:
+                                        _skip_llm_state = False
+                                else:
+                                    _skip_llm_state = False
+
                                 # 3. LLM fallback for unrecognised option text.
-                                if not chosen_val:
+                                if not chosen_val and not _skip_llm_state:
                                     try:
                                         from utils.form_answers import pick_option as _pick_opt
                                         _log(

@@ -13,6 +13,8 @@ ATS_PATTERNS = {
     "ateam": ["a.team", "onboarding.a.team"],
     "personio": ["personio.com"],
     "rippling": ["ats.rippling.com"],
+    "bamboohr": ["bamboohr.com"],
+    "aha": ["aha.io"],
 }
 
 # ATS platforms that use custom React/SPA forms incompatible with scan_fields.
