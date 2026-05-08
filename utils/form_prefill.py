@@ -296,8 +296,10 @@ async def run_prefill_session(
 
             # Click through to the application form.
             active_page = page
+            _apply_clicked = False
             try:
                 clicked, active_page = await try_click_apply(active_page)
+                _apply_clicked = clicked
                 if clicked:
                     _log(f"Clicked Apply → {active_page.url[:80]}")
                     await _wait_for_spa(active_page)
@@ -411,7 +413,24 @@ async def run_prefill_session(
                         filled_urls.add(key)
                         await _do_fill(active_page, profile, job, result, log_fn=_log, timing=timing)
                 else:
-                    _log("No application form detected — browser is open, navigate to the form manually.")
+                    # Last resort: scan for form fields on unrecognised pages,
+                    # but only when Apply was actually clicked (inline form revealed).
+                    # Avoids probing bare listing pages where no interaction occurred.
+                    _probe_fields = []
+                    if _apply_clicked:
+                        try:
+                            _probe_fields = await scan_fields(active_page)
+                        except Exception:
+                            _probe_fields = []
+                    if _probe_fields:
+                        _log(f"Unknown ATS but {len(_probe_fields)} field(s) found — attempting fill…")
+                        result["ats"] = "unknown"
+                        key = _page_key(active_page.url)
+                        if key not in filled_urls:
+                            filled_urls.add(key)
+                            await _do_fill(active_page, profile, job, result, log_fn=_log, timing=timing)
+                    else:
+                        _log("No application form detected — browser is open, navigate to the form manually.")
 
             # ----------------------------------------------------------------
             # Keep browser open.  The polling watcher handles same-tab
