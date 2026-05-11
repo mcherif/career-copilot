@@ -24,6 +24,9 @@ MANUAL_ONLY_ATS = {"ateam", "workday"}
 _ATS_URL_REGEXES: list[tuple[str, _re.Pattern]] = [
     # Comeet: careers.tether.io/o/{slug}/c/new  (or /c/{id} variants)
     ("comeet", _re.compile(r"/o/[^/?#]+/c/", _re.I)),
+    # Greenhouse hash-based SPA routing on custom employer domains:
+    # motional.com/open-positions#/6608351003/apply
+    ("greenhouse", _re.compile(r"#/\d+(/apply)?$", _re.I)),
 ]
 
 
