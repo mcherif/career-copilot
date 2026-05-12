@@ -10,6 +10,8 @@ from utils.ats_detector import detect_ats
     ("https://yellowcard.bamboohr.com/careers/385", "bamboohr"),
     ("https://jobs.ashbyhq.com/company/job", "ashby"),
     ("https://careers.tether.io/o/some-slug/c/new", "comeet"),
+    ("https://canonical.com/careers/5792361/application", "canonical"),
+    ("https://canonical.com/careers/5792361", "unknown"),
     ("https://example.com/jobs/123", "unknown"),
 ])
 def test_detect_ats(url, expected):

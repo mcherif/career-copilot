@@ -27,6 +27,8 @@ _ATS_URL_REGEXES: list[tuple[str, _re.Pattern]] = [
     # Greenhouse hash-based SPA routing on custom employer domains:
     # motional.com/open-positions#/6608351003/apply
     ("greenhouse", _re.compile(r"#/\d+(/apply)?$", _re.I)),
+    # Canonical's own ATS: canonical.com/careers/{id}/application
+    ("canonical", _re.compile(r"canonical\.com/careers/\d+/application", _re.I)),
 ]
 
 
