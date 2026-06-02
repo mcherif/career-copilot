@@ -631,51 +631,53 @@ def _run_prefill_thread(job_dict: Dict[str, Any], profile: Dict[str, Any]) -> No
         except Exception as exc:
             _prefill_log(f"Metadata scrape failed: {exc}")
 
-    # Auto-generate cover letter if the job doesn't have one yet.
-    if not job_dict.get("cover_letter"):
-        _prefill_log("Generating cover letter via LLM…")
-        try:
-            from utils.cover_letter import generate_cover_letter
-            cl_result = generate_cover_letter(job_dict, profile)
-            if cl_result.get("status") == "ok":
-                job_dict = dict(job_dict)
-                job_dict["cover_letter"] = cl_result["cover_letter"]
-                preview = cl_result["cover_letter"][:120].replace("\n", " ")
-                _prefill_log(f"Cover letter generated: {preview}…")
-                # Persist to DB so it's available in the UI too.
-                session = _Session()
-                try:
-                    db_job = session.query(Job).filter(Job.id == job_dict["id"]).first()
-                    if db_job:
-                        db_job.cover_letter = cl_result["cover_letter"]
-                        session.commit()
-                except Exception:
-                    pass
-                finally:
-                    session.close()
-            else:
-                _prefill_log("Cover letter generation failed — will skip upload.")
-        except Exception as exc:
-            _prefill_log(f"Cover letter error: {exc}")
-    else:
+    if job_dict.get("cover_letter"):
         cl_text = job_dict.get("cover_letter", "")
         preview = cl_text[:120].replace("\n", " ")
         _prefill_log(f"Cover letter ready: {preview}…")
 
-    # Save cover letter PDF now so the user always has a file to upload manually,
-    # even if the automated upload fails or the ATS field isn't detected.
-    if job_dict.get("cover_letter"):
+    def _gen_cover_letter(job: Dict[str, Any], profile: Dict[str, Any]) -> None:
+        """Generate, persist, and write a cover letter PDF.
+
+        Called on-demand from the browser session only when the form actually
+        has a cover letter field — avoids wasting LLM time when the application
+        link is dead or the form has no cover letter field.
+        """
+        from utils.cover_letter import generate_cover_letter
+        _prefill_log("Cover letter field detected — generating via LLM…")
         try:
-            from utils.form_filler import _resolve_cover_letter_path
-            _resolve_cover_letter_path({}, job_dict, log_fn=_prefill_log)
+            cl_result = generate_cover_letter(job, profile)
+            if cl_result.get("status") == "ok":
+                job["cover_letter"] = cl_result["cover_letter"]
+                preview = cl_result["cover_letter"][:120].replace("\n", " ")
+                _prefill_log(f"Cover letter generated: {preview}…")
+                # Persist to DB.
+                _session = _Session()
+                try:
+                    db_job = _session.query(Job).filter(Job.id == job.get("id")).first()
+                    if db_job:
+                        db_job.cover_letter = cl_result["cover_letter"]
+                        _session.commit()
+                except Exception:
+                    pass
+                finally:
+                    _session.close()
+                # Write PDF so the user can also upload it manually.
+                try:
+                    from utils.form_filler import _resolve_cover_letter_path
+                    _resolve_cover_letter_path({}, job, log_fn=_prefill_log)
+                except Exception as exc:
+                    _prefill_log(f"Cover letter PDF save error: {exc}")
+            else:
+                _prefill_log("Cover letter generation failed — will skip upload.")
         except Exception as exc:
-            _prefill_log(f"Cover letter PDF save error: {exc}")
+            _prefill_log(f"Cover letter error: {exc}")
 
     _prefill_log("Launching browser…")
     from utils.form_prefill import run_prefill_session
 
     try:
-        result = asyncio.run(run_prefill_session(job_dict, profile, cancel_event=_prefill_cancel, log_fn=_prefill_log, timing=__import__("os").environ.get("CC_PROFILE") == "1"))
+        result = asyncio.run(run_prefill_session(job_dict, profile, cancel_event=_prefill_cancel, log_fn=_prefill_log, timing=__import__("os").environ.get("CC_PROFILE") == "1", cover_letter_fn=_gen_cover_letter))
     except Exception as exc:
         result = {"status": "failed", "error": str(exc)}
 

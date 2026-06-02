@@ -129,6 +129,7 @@ async def run_prefill_session(
     cancel_event=None,
     log_fn=None,
     timing: bool = False,
+    cover_letter_fn=None,
 ) -> Dict[str, Any]:
     """
     Open a job URL in Playwright, navigate to the application form,
@@ -216,7 +217,7 @@ async def run_prefill_session(
                     if key in filled_urls:
                         return
                     result["ats"] = tab_ats
-                    await _do_fill(new_page, profile, job, result, log_fn=_log, timing=timing)
+                    await _do_fill(new_page, profile, job, result, log_fn=_log, timing=timing, cover_letter_fn=cover_letter_fn)
                     filled_urls.add(key)
                     new_page.on("close", lambda: closed_event.set())
                 except Exception:
@@ -411,7 +412,7 @@ async def run_prefill_session(
                     else:
                         _log(f"ATS detected: {ats} — filling form…")
                         filled_urls.add(key)
-                        await _do_fill(active_page, profile, job, result, log_fn=_log, timing=timing)
+                        await _do_fill(active_page, profile, job, result, log_fn=_log, timing=timing, cover_letter_fn=cover_letter_fn)
                 else:
                     # Last resort: scan for form fields on unrecognised pages,
                     # but only when Apply was actually clicked (inline form revealed).
@@ -428,7 +429,7 @@ async def run_prefill_session(
                         key = _page_key(active_page.url)
                         if key not in filled_urls:
                             filled_urls.add(key)
-                            await _do_fill(active_page, profile, job, result, log_fn=_log, timing=timing)
+                            await _do_fill(active_page, profile, job, result, log_fn=_log, timing=timing, cover_letter_fn=cover_letter_fn)
                     else:
                         _log("No application form detected — browser is open, navigate to the form manually.")
 
@@ -444,7 +445,7 @@ async def run_prefill_session(
                 closed_event.set()
 
             watch_task = asyncio.create_task(
-                _watch_for_ats_and_fill(active_page, profile, job, result, closed_event, filled_urls, log_fn=_log, timing=timing)
+                _watch_for_ats_and_fill(active_page, profile, job, result, closed_event, filled_urls, log_fn=_log, timing=timing, cover_letter_fn=cover_letter_fn)
             )
 
             security_task = asyncio.create_task(
@@ -673,6 +674,86 @@ async def _set_iti_phone_country(page, profile: Dict[str, Any], log_fn=None) -> 
             await page.keyboard.press("Escape")
     except Exception:
         pass
+
+
+async def _fix_react_phone_input(page, profile: Dict[str, Any], log_fn=None) -> None:
+    """Handle react-phone-input-2 country selection and number fill.
+
+    Comeet (and similar ATSes) render phone as a react-phone-input-2 widget:
+    a flag <div class="flag-dropdown"> beside a React-controlled <input type="tel">.
+    The flag div is not captured by scan_fields, so the country is never set and
+    fill_form puts the full international number into a React input that formats it
+    according to the wrong (default) country.
+
+    This function:
+    1. Detects the .flag-dropdown element.
+    2. Clicks it to open the country list.
+    3. Selects the correct country by data-dial-code or name.
+    4. Clears and re-fills the tel input with the bare local number.
+    """
+    personal = profile.get("personal") or {}
+    bare = str(personal.get("phone") or "").strip()
+    country = str(personal.get("phone_country") or "").strip()
+    cc = str(personal.get("phone_country_code") or "").strip()
+    iso2 = _ITI_COUNTRY_MAP.get(country.lower(), "")
+    if not bare or not country:
+        return
+
+    def _log(msg: str) -> None:
+        if log_fn:
+            try:
+                log_fn(msg)
+            except Exception:
+                pass
+
+    try:
+        flag_btn = page.locator(".flag-dropdown, .react-tel-input .selected-flag").first
+        if await flag_btn.count() == 0 or not await flag_btn.is_visible(timeout=800):
+            return
+
+        await flag_btn.click()
+        await asyncio.sleep(0.4)
+
+        # Some implementations expose a search box inside the country list.
+        search = page.locator(
+            ".country-list .search-box, .country-list input[type='search'], "
+            ".country-list input[type='text']"
+        ).first
+        if await search.count() > 0 and await search.is_visible(timeout=400):
+            await search.fill(country)
+            await asyncio.sleep(0.3)
+
+        # Select by data-dial-code, data-flag (ISO), or visible country name.
+        selectors = []
+        if cc:
+            selectors.append(f".country-list [data-dial-code='{cc}']")
+        if iso2:
+            selectors.append(f".country-list [data-flag='{iso2}']")
+        selectors.append(f".country-list li:has-text('{country}')")
+        country_item = page.locator(", ".join(selectors)).first
+
+        if await country_item.count() == 0 or not await country_item.is_visible(timeout=1000):
+            await page.keyboard.press("Escape")
+            _log(f"React phone: '{country}' (+{cc}) not found in dropdown")
+            return
+
+        await country_item.click()
+        _log(f"React phone: country set to {country} (+{cc})")
+        await asyncio.sleep(0.2)
+
+        # Clear and re-fill the tel input with only the local number (react-phone-input-2
+        # prepends the country code automatically).
+        tel = page.locator(".react-tel-input input[type='tel'], .react-tel-input input.form-control").first
+        if await tel.count() == 0:
+            tel = page.locator("input[type='tel']").first
+        if await tel.count() > 0:
+            await tel.click()
+            await tel.press("Control+a")
+            await tel.press("Delete")
+            await tel.press_sequentially(bare, delay=30)
+            _log(f"React phone: filled number '{bare}'")
+    except Exception as exc:
+        _log(f"React phone fix error: {exc}")
 
 
 async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None, timing: bool = False) -> None:
@@ -1065,7 +1146,22 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None, t
         )
 
 
-async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: Dict[str, Any], log_fn=None, timing: bool = False) -> None:
+def _fields_need_cover_letter(fields: list) -> bool:
+    """Return True if any detected field looks like a cover-letter upload or textarea."""
+    for f in fields:
+        label = (f.get("label") or "").lower()
+        fid = (f.get("id") or "").lower()
+        fname = (f.get("name") or "").lower()
+        if any(kw in label for kw in ("cover letter", "cover_letter", "covering letter")):
+            return True
+        if any(kw in fid for kw in ("cover_letter", "coverletter")):
+            return True
+        if any(kw in fname for kw in ("cover_letter", "coverletter")):
+            return True
+    return False
+
+
+async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: Dict[str, Any], log_fn=None, timing: bool = False, cover_letter_fn=None) -> None:
     """Scan and fill all form fields on the current page; update result in place."""
     def _log(msg: str) -> None:
         if log_fn:
@@ -1096,6 +1192,17 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
                 fields, fill_target = await _scan_with_frame_fallback(page)
         except Exception:
             pass
+
+    # Generate cover letter on demand — only when the form actually has a
+    # cover letter field and we don't already have one.  This avoids the
+    # slow LLM call when the application link is dead or the form has no
+    # cover letter field.
+    if cover_letter_fn and fields and not job.get("cover_letter"):
+        if _fields_need_cover_letter(fields):
+            try:
+                await asyncio.to_thread(cover_letter_fn, job, profile)
+            except Exception:
+                pass
 
     # Workable pre-fill: upload resume first so Workable auto-populates
     # name, email, work history, etc. before we fill remaining fields.
@@ -1191,6 +1298,14 @@ async def _do_fill(page, profile: Dict[str, Any], job: Dict[str, Any], result: D
     except Exception:
         pass
 
+    # Fix react-phone-input-2 (Comeet and similar ATSes).
+    # The flag <div> is invisible to scan_fields; this selects the country
+    # and re-fills the number with the bare local digits.
+    try:
+        await _fix_react_phone_input(fill_target, profile, log_fn=_log)
+    except Exception:
+        pass
+
     # Call try_upload_resume for React-based upload buttons (e.g. Workable) that
     # ignore set_input_files().  Skip if early Workable upload already succeeded
     # to avoid uploading twice.  On other ATSes (e.g. Greenhouse) where fill_form
@@ -1251,6 +1366,7 @@ async def _watch_for_ats_and_fill(
     poll_interval: float = 1.5,
     log_fn=None,
     timing: bool = False,
+    cover_letter_fn=None,
 ) -> None:
     """Poll page.url for same-tab navigation to ATS pages not yet filled."""
     while not closed_event.is_set():
@@ -1271,7 +1387,7 @@ async def _watch_for_ats_and_fill(
                 continue
             await _wait_for_spa(page)
             result["ats"] = current_ats
-            await _do_fill(page, profile, job, result, log_fn=log_fn, timing=timing)
+            await _do_fill(page, profile, job, result, log_fn=log_fn, timing=timing, cover_letter_fn=cover_letter_fn)
             filled_urls.add(key)
         except Exception:
             pass

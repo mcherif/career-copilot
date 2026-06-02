@@ -40,6 +40,10 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
         "personal", {}).get("current_company", "")),
     (["organization"], lambda p, j: p.get(
         "personal", {}).get("current_company", "")),
+    # "Preferred First Name" is a nickname/alias field — leave empty unless profile
+    # has a preferred_name set (prevents legal first name bleeding into this slot).
+    (["preferred first name"], lambda p, j: p.get("personal", {}).get("preferred_name", "")),
+    (["preferred name"], lambda p, j: p.get("personal", {}).get("preferred_name", "")),
     # First/last name rules must come before the generic "name" rule.
     (["first name"], lambda p, j: (
         p.get("personal", {}).get("name", "") or "").split()[0]),
@@ -111,6 +115,10 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["authorized to work"], lambda p, j: "yes"),
     (["eligible to work"], lambda p, j: "yes"),
     (["work authorization"], lambda p, j: "yes"),
+    # Phone country-code selector — matched by field name attr (id="phone_country_code"
+    # / name="job_application[phone_country_code]") when getLabel returns "Phone"
+    # because the select is nested inside the phone field's DOM wrapper.
+    (["phone_country_code"], lambda p, j: p.get("personal", {}).get("phone_country", "")),
     (["country"], lambda p, j: p.get("personal", {}).get("phone_country", "")
      or p.get("personal", {}).get("location", "").split(",")[-1].strip()),
     (["linkedin"], lambda p, j: p.get("personal", {}).get("linkedin", "")),
@@ -189,6 +197,8 @@ _TEXT_RULES: list[tuple[list[str], Any]] = [
     (["sex"], lambda p, j: p.get("personal", {}).get("gender", "")),
     (["race"], lambda p, j: p.get("personal", {}).get("race", "")),
     (["ethnicity"], lambda p, j: p.get("personal", {}).get("race", "")),
+    (["racial"], lambda p, j: p.get("personal", {}).get("race", "")),
+    (["ethnic"], lambda p, j: p.get("personal", {}).get("race", "")),
     (["disability"], lambda p, j: p.get("personal", {}).get("disability", "")),
     (["veteran"], lambda p, j: p.get("personal", {}).get("veteran", "")),
     (["armed forces"], lambda p, j: p.get("personal", {}).get("veteran", "")),
@@ -436,6 +446,8 @@ async def fill_form(
     _has_country_field = any(
         any(kw in (f.get("label") or "").lower()
             for kw in ("country", "country code", "phone code", "dial code", "dialing code"))
+        or any(kw in (f.get("name") or f.get("id") or "").lower()
+               for kw in ("country_code", "phone_country"))
         for f in fields
     )
     job = dict(job)  # shallow copy so we don't mutate the caller's dict
@@ -747,7 +759,13 @@ async def fill_form(
         # el.type on a <select> element returns "select-one" or "select-multiple",
         # not "select" — handle all three to avoid silently skipping native dropdowns.
         elif ftype in ("select", "select-one", "select-multiple"):
-            value = _resolve_text_value(label_lower, profile, job)
+            # Try name/id attr first (same belt-and-suspenders as text fields).
+            # Catches selects whose getLabel returns the wrong label — e.g. the
+            # Greenhouse phone country <select id="phone_country_code"> is nested
+            # inside the "Phone" label wrapper so it gets label="Phone".
+            _sel_name = field.get("name") or field.get("id") or ""
+            _sel_name_val = _resolve_text_value(_sel_name.lower(), profile, job) if _sel_name else ""
+            value = _sel_name_val or _resolve_text_value(label_lower, profile, job)
             if value and not dry_run:
                 try:
                     el = await _locate_field(page, field)
@@ -2270,6 +2288,16 @@ async def _select_combobox_option(
                 break
 
     if not opts:
+        # For location-type fields, try Google Places autocomplete (.pac-item).
+        if is_input and any(kw in label_lower for kw in ("location", "city", "where", "address")):
+            try:
+                pac = page.locator(".pac-item").first
+                if await pac.count() > 0 and await pac.is_visible(timeout=500):
+                    await pac.click()
+                    await asyncio.sleep(0.2)
+                    return value
+            except Exception:
+                pass
         await el.press("Escape")
         return None
 
