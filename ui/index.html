@@ -45,6 +45,9 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
 .strip-spacer{flex:1;}
 .btn-fill-url{display:flex;align-items:center;gap:6px;padding:7px 13px;background:var(--bg-subtle);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:12.5px;font-weight:600;cursor:pointer;transition:all var(--transition);margin-right:6px;}
 .btn-fill-url:hover{background:var(--bg-card);color:var(--accent);border-color:var(--accent-mid);}
+.btn-reject-stale{display:none;align-items:center;gap:6px;padding:7px 13px;background:var(--red-light);color:var(--red);border:1px solid var(--red-mid);border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:12.5px;font-weight:600;cursor:pointer;transition:all var(--transition);margin-right:6px;}
+.btn-reject-stale:hover{background:var(--red-mid);color:var(--red);border-color:var(--red);}
+.btn-reject-stale.visible{display:flex;}
 .btn-pipeline{display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:all var(--transition);box-shadow:var(--shadow-sm);}
 .btn-pipeline:hover{background:#2563eb;box-shadow:0 0 0 3px rgba(59,130,246,.25);}
 .btn-pipeline svg{width:14px;height:14px;}
@@ -286,6 +289,10 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
     <span>Expired</span><span class="count">—</span>
   </div>
   <div class="strip-spacer"></div>
+  <button class="btn-reject-stale" id="rejectStaleBtn" onclick="openRejectStaleModal()" title="Reject all jobs in this tab older than 2 weeks">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+    Reject Stale
+  </button>
   <button class="btn-fill-url" onclick="openFillUrlModal()" title="Fill a known application form URL directly">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
     Fill URL
@@ -546,6 +553,22 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
   </div>
 </div>
 
+<!-- Reject Stale modal -->
+<div class="modal-overlay" id="rejectStaleOverlay" onclick="closeRejectStaleModal()" style="display:none"></div>
+<div class="modal-box" id="rejectStaleModal" style="display:none">
+  <div class="modal-header">
+    <span class="modal-title">Reject Stale Jobs</span>
+    <button class="btn-close" onclick="closeRejectStaleModal()">×</button>
+  </div>
+  <div class="modal-body">
+    <p class="modal-hint" id="rejectStaleMsg"></p>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-modal-cancel" onclick="closeRejectStaleModal()">Cancel</button>
+    <button class="btn-modal-fill" style="background:var(--red);border:none;" id="rejectStaleConfirmBtn" onclick="confirmRejectStale()">Reject All</button>
+  </div>
+</div>
+
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
 let jobs = [];
@@ -625,6 +648,42 @@ function filterJobs(status, el) {
   document.querySelectorAll('.status-pill').forEach(p => p.classList.remove('active'));
   if (el) el.classList.add('active');
   loadJobs(status);
+  const staleBtn = document.getElementById('rejectStaleBtn');
+  if (staleBtn) staleBtn.classList.toggle('visible', status === 'review' || status === 'shortlisted');
+}
+
+function openRejectStaleModal() {
+  const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+  const staleCount = jobs.filter(j => j.created_at && new Date(j.created_at).getTime() < cutoff).length;
+  const label = currentStatus === 'shortlisted' ? 'Shortlisted' : 'Review';
+  document.getElementById('rejectStaleMsg').textContent =
+    staleCount > 0
+      ? `Permanently reject ${staleCount} ${label} job${staleCount === 1 ? '' : 's'} added more than 14 days ago?`
+      : `No jobs older than 14 days found in the ${label} queue.`;
+  document.getElementById('rejectStaleConfirmBtn').style.display = staleCount > 0 ? '' : 'none';
+  document.getElementById('rejectStaleOverlay').style.display = '';
+  document.getElementById('rejectStaleModal').style.display = '';
+}
+
+function closeRejectStaleModal() {
+  document.getElementById('rejectStaleOverlay').style.display = 'none';
+  document.getElementById('rejectStaleModal').style.display = 'none';
+}
+
+async function confirmRejectStale() {
+  closeRejectStaleModal();
+  try {
+    const res = await api('/api/jobs/bulk-reject-stale', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({status: currentStatus, older_than_days: 14})
+    });
+    showToast(`Rejected ${res.rejected} stale job${res.rejected === 1 ? '' : 's'}`, '');
+    loadStats();
+    loadJobs(currentStatus);
+  } catch(e) {
+    showToast('Bulk reject failed', 'error');
+  }
 }
 
 // ── Card render ────────────────────────────────────────────────────────────

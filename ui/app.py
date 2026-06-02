@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -377,6 +377,36 @@ async def update_status(job_id: int, body: StatusUpdate):
         return {"ok": True, "id": job_id, "status": body.status}
     except HTTPException:
         raise
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(500, str(exc))
+    finally:
+        session.close()
+
+
+class BulkRejectStaleRequest(BaseModel):
+    status: str
+    older_than_days: int = 14
+
+
+@app.post("/api/jobs/bulk-reject-stale")
+async def bulk_reject_stale(body: BulkRejectStaleRequest):
+    allowed = {"shortlisted", "review"}
+    if body.status not in allowed:
+        raise HTTPException(400, f"bulk-reject-stale only supports: {', '.join(sorted(allowed))}")
+    cutoff = datetime.utcnow() - timedelta(days=body.older_than_days)
+    session = _Session()
+    try:
+        stale = (
+            session.query(Job)
+            .filter(Job.status == body.status, Job.created_at < cutoff)
+            .all()
+        )
+        count = len(stale)
+        for job in stale:
+            job.status = "rejected"
+        session.commit()
+        return {"ok": True, "rejected": count}
     except Exception as exc:
         session.rollback()
         raise HTTPException(500, str(exc))
