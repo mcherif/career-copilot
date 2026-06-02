@@ -777,6 +777,13 @@ async def _fill_employment_history(page, profile: Dict[str, Any], log_fn=None, t
     if not work_history:
         return
 
+    # Present/ongoing roles must come first so the form's first employment slot
+    # gets the current employer — YAML order may put a past role first.
+    work_history = sorted(
+        work_history,
+        key=lambda e: (0 if str(e.get("to") or "").strip().lower() == "present" else 1),
+    )
+
     # Selectors for the "Add another" button in employment sections.
     add_btn_selectors = [
         "button:has-text('Add another')",
