@@ -48,6 +48,19 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
 .btn-reject-stale{display:none;align-items:center;gap:6px;padding:7px 13px;background:var(--red-light);color:var(--red);border:1px solid var(--red-mid);border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:12.5px;font-weight:600;cursor:pointer;transition:all var(--transition);margin-right:6px;}
 .btn-reject-stale:hover{background:var(--red-mid);color:var(--red);border-color:var(--red);}
 .btn-reject-stale.visible{display:flex;}
+.list-view{padding:20px 28px;overflow-y:auto;flex:1;}
+.list-view-header{font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;padding:0 4px 8px;border-bottom:1px solid var(--border-subtle);margin-bottom:4px;display:flex;gap:12px;}
+.list-view-header span:first-child{flex:1}
+.list-row{display:flex;align-items:center;gap:12px;padding:9px 4px;border-bottom:1px solid var(--border-subtle);transition:background var(--transition);}
+.list-row:hover{background:var(--bg-hover);border-radius:6px;}
+.list-avatar{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;}
+.list-info{flex:1;min-width:0;}
+.list-title{font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.list-company{font-size:11.5px;color:var(--text-secondary);}
+.list-score{font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;width:46px;text-align:center;flex-shrink:0;}
+.list-date{font-size:11.5px;color:var(--text-muted);width:60px;text-align:right;flex-shrink:0;}
+.list-link{width:26px;height:26px;border-radius:6px;background:var(--bg-subtle);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--text-muted);text-decoration:none;transition:all var(--transition);flex-shrink:0;}
+.list-link:hover{background:var(--accent-light);color:var(--accent);border-color:var(--accent-mid);}
 .btn-pipeline{display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:all var(--transition);box-shadow:var(--shadow-sm);}
 .btn-pipeline:hover{background:#2563eb;box-shadow:0 0 0 3px rgba(59,130,246,.25);}
 .btn-pipeline svg{width:14px;height:14px;}
@@ -506,6 +519,13 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
       </div>
     </div>
   </div>
+
+  <div class="list-view" id="listView" style="display:none">
+    <div class="list-view-header">
+      <span>Job</span><span style="width:46px;text-align:center">Score</span><span style="width:60px;text-align:right">Added</span><span style="width:26px"></span>
+    </div>
+    <div id="listViewRows"></div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -631,11 +651,13 @@ async function loadJobs(status) {
     const data = await api(`/api/jobs?status=${status}`);
     jobs = data.jobs || [];
     idx = 0;
-    if (jobs.length > 0) {
+    if (jobs.length === 0) {
+      renderEmpty(status);
+    } else if (_LIST_STATUSES.has(status)) {
+      renderList(jobs);
+    } else {
       renderCardWrap();
       renderCard(idx);
-    } else {
-      renderEmpty(status);
     }
     updateNav();
   } catch(e) {
@@ -673,11 +695,7 @@ function closeRejectStaleModal() {
 async function confirmRejectStale() {
   closeRejectStaleModal();
   try {
-    const res = await api('/api/jobs/bulk-reject-stale', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({status: currentStatus, older_than_days: 14})
-    });
+    const res = await api('/api/jobs/bulk-reject-stale', 'POST', {status: currentStatus, older_than_days: 14});
     showToast(`Rejected ${res.rejected} stale job${res.rejected === 1 ? '' : 's'}`, '');
     loadStats();
     loadJobs(currentStatus);
@@ -809,8 +827,11 @@ function renderCard(i, direction) {
   updateNav();
 }
 
+const _LIST_STATUSES = new Set(['rejected', 'expired']);
+
 function renderEmpty(status) {
   document.getElementById('cardWrap').style.display = 'none';
+  document.getElementById('listView').style.display = 'none';
   document.getElementById('emptyTitle').textContent = `No ${status} jobs`;
   document.getElementById('emptyState').style.display = 'flex';
   document.getElementById('navCounter').textContent = `0 ${status} jobs`;
@@ -818,7 +839,31 @@ function renderEmpty(status) {
 
 function renderCardWrap() {
   document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('listView').style.display = 'none';
   document.getElementById('cardWrap').style.display = '';
+}
+
+function renderList(jobList) {
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('cardWrap').style.display = 'none';
+  const scoreColor = s => s >= 70 ? `background:var(--green-mid);color:var(--green)` :
+                          s >= 50 ? `background:var(--orange-mid);color:var(--orange)` :
+                                    `background:var(--red-mid);color:var(--red)`;
+  document.getElementById('listViewRows').innerHTML = jobList.map(j => `
+    <div class="list-row">
+      <div class="list-avatar" style="background:${j.avatar_color}">${esc(j.avatar_text)}</div>
+      <div class="list-info">
+        <div class="list-title">${esc(j.title)}</div>
+        <div class="list-company">${esc(j.company)}</div>
+      </div>
+      <div class="list-score" style="${j.fit_score != null ? scoreColor(j.fit_score) : 'color:var(--text-muted)'}">${j.fit_score != null ? j.fit_score : '—'}</div>
+      <div class="list-date">${j.created_at ? relativeDate(j.created_at) : '—'}</div>
+      <a class="list-link" href="${esc(j.url)}" target="_blank" rel="noopener" title="Open job posting">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </a>
+    </div>`).join('');
+  document.getElementById('listView').style.display = '';
+  document.getElementById('navCounter').textContent = `${jobList.length} ${currentStatus} jobs`;
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────
