@@ -582,6 +582,7 @@ body{font-family:'Inter',sans-serif;background:linear-gradient(145deg,#091418 0%
   </div>
   <div class="modal-body">
     <p class="modal-hint" id="rejectStaleMsg"></p>
+    <div id="rejectStaleList" style="max-height:260px;overflow-y:auto;margin-top:4px;display:none"></div>
   </div>
   <div class="modal-footer">
     <button class="btn-modal-cancel" onclick="closeRejectStaleModal()">Cancel</button>
@@ -676,13 +677,26 @@ function filterJobs(status, el) {
 
 function openRejectStaleModal() {
   const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
-  const staleCount = jobs.filter(j => j.created_at && new Date(j.created_at).getTime() < cutoff).length;
+  const stale = jobs.filter(j => j.created_at && new Date(j.created_at).getTime() < cutoff);
   const label = currentStatus === 'shortlisted' ? 'Shortlisted' : 'Review';
-  document.getElementById('rejectStaleMsg').textContent =
-    staleCount > 0
-      ? `Permanently reject ${staleCount} ${label} job${staleCount === 1 ? '' : 's'} added more than 14 days ago?`
-      : `No jobs older than 14 days found in the ${label} queue.`;
-  document.getElementById('rejectStaleConfirmBtn').style.display = staleCount > 0 ? '' : 'none';
+  const listEl = document.getElementById('rejectStaleList');
+  if (stale.length > 0) {
+    document.getElementById('rejectStaleMsg').textContent =
+      `Permanently reject these ${stale.length} ${label} job${stale.length === 1 ? '' : 's'} (older than 14 days)?`;
+    listEl.innerHTML = stale.map(j => `
+      <div style="display:flex;align-items:center;gap:9px;padding:7px 4px;border-bottom:1px solid var(--border-subtle);">
+        <div style="width:26px;height:26px;border-radius:50%;background:${j.avatar_color};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0">${esc(j.avatar_text)}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12.5px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(j.title)}</div>
+          <div style="font-size:11.5px;color:var(--text-secondary)">${esc(j.company)} &middot; ${j.created_at ? relativeDate(j.created_at) : '—'}</div>
+        </div>
+      </div>`).join('');
+    listEl.style.display = '';
+  } else {
+    document.getElementById('rejectStaleMsg').textContent = `No jobs older than 14 days in the ${label} queue.`;
+    listEl.style.display = 'none';
+  }
+  document.getElementById('rejectStaleConfirmBtn').style.display = stale.length > 0 ? '' : 'none';
   document.getElementById('rejectStaleOverlay').style.display = '';
   document.getElementById('rejectStaleModal').style.display = '';
 }
